@@ -2,6 +2,15 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, BookOpen, Users, GraduationCap, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ChurchLogo } from '@/components/ChurchLogo';
+import { useState, useEffect } from 'react';
+
+const heroImages = [
+  '/images/hero-1.jpg',
+  '/images/hero-2.jpg',
+  '/images/hero-3.jpg',
+  '/images/hero-4.jpg',
+  '/images/hero-5.jpg',
+];
 
 const features = [
   {
@@ -29,6 +38,16 @@ const stats = [
 ];
 
 export default function Index() {
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentImageIndex((prevIndex) => (prevIndex + 1) % heroImages.length);
+    }, 2000); 
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
       {/* Navigation */}
@@ -47,14 +66,32 @@ export default function Index() {
       </nav>
 
       {/* Hero Section */}
-      <section className="pt-32 pb-20 bg-gradient-hero">
-        <div className="container mx-auto px-6">
+      <section className="relative pt-32 pb-20 overflow-hidden">
+        {/* Animated Background Images */}
+        <div className="absolute inset-0 z-0">
+          {heroImages.map((image, index) => (
+            <div
+              key={index}
+              className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+              style={{
+                opacity: currentImageIndex === index ? 1 : 0,
+                backgroundImage: `url(${image})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+              }}
+            />
+          ))}
+          {/* Dark overlay for better text readability */}
+          <div className="absolute inset-0 bg-black/50" />
+        </div>
+
+        <div className="container mx-auto px-6 relative z-10">
           <div className="max-w-4xl mx-auto text-center animate-fade-in">
-            <h1 className="text-5xl md:text-6xl font-serif font-bold text-foreground mb-6 leading-tight">
+            <h1 className="text-5xl md:text-6xl font-serif font-bold text-white mb-6 leading-tight">
               Develop Your Skills,{' '}
-              <span className="text-gradient-primary">Serve With Purpose</span>
+              <span className="text-church-gold">Serve With Purpose</span>
             </h1>
-            <p className="text-xl text-muted-foreground mb-10 max-w-2xl mx-auto">
+            <p className="text-xl text-white/90 mb-10 max-w-2xl mx-auto">
               Join our church's skill acquisition center and discover your God-given talents. Learn practical skills that empower you to serve and contribute to your community.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
