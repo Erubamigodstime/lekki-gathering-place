@@ -6,12 +6,12 @@ import StudentDashboard from './StudentDashboard';
 export default function DashboardPage() {
   const { user } = useAuth();
 
-  switch (user?.role) {
-    case 'admin':
+  switch (user?.role?.toUpperCase()) {
+    case 'ADMIN':
       return <AdminDashboard />;
-    case 'instructor':
+    case 'INSTRUCTOR':
       return <InstructorDashboard />;
-    case 'student':
+    case 'STUDENT':
       return <StudentDashboard />;
     default:
       return <StudentDashboard />;

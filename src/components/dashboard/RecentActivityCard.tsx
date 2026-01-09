@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Loader2, Activity } from 'lucide-react';
 
 interface Activity {
   id: string;
@@ -16,9 +17,10 @@ interface Activity {
 
 interface RecentActivityCardProps {
   activities: Activity[];
+  loading?: boolean;
 }
 
-export function RecentActivityCard({ activities }: RecentActivityCardProps) {
+export function RecentActivityCard({ activities, loading = false }: RecentActivityCardProps) {
   const getTypeBadge = (type: Activity['type']) => {
     switch (type) {
       case 'enrollment':
@@ -38,8 +40,22 @@ export function RecentActivityCard({ activities }: RecentActivityCardProps) {
         <CardTitle className="text-lg font-semibold">Recent Activity</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          {activities.map((activity, index) => (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-10">
+            <Loader2 className="h-10 w-10 animate-spin text-primary mb-3" />
+            <p className="text-sm text-muted-foreground">Loading activities...</p>
+          </div>
+        ) : activities.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10">
+            <div className="w-14 h-14 rounded-full bg-indigo-100 flex items-center justify-center mb-3">
+              <Activity className="h-7 w-7 text-indigo-600" />
+            </div>
+            <h4 className="font-semibold text-foreground mb-1">No Activity Yet</h4>
+            <p className="text-sm text-muted-foreground text-center max-w-xs">Recent activities from your classes will appear here.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {activities.map((activity, index) => (
             <div 
               key={activity.id}
               className="flex items-start gap-4 animate-slide-in-right"
@@ -63,7 +79,8 @@ export function RecentActivityCard({ activities }: RecentActivityCardProps) {
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

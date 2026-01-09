@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'instructor' | 'student';
+export type UserRole = 'ADMIN' | 'INSTRUCTOR' | 'STUDENT';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 

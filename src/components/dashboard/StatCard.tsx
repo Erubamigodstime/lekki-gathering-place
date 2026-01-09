@@ -21,6 +21,17 @@ export function StatCard({
   iconColor = 'text-primary',
   className 
 }: StatCardProps) {
+  // Map icon colors to corresponding background colors
+  const getIconBackground = (color: string) => {
+    if (color.includes('primary')) return 'bg-blue-100';
+    if (color.includes('accent')) return 'bg-purple-100';
+    if (color.includes('amber')) return 'bg-amber-100';
+    if (color.includes('green')) return 'bg-green-100';
+    if (color.includes('red') || color.includes('destructive')) return 'bg-red-100';
+    if (color.includes('indigo')) return 'bg-indigo-100';
+    return 'bg-muted/50';
+  };
+
   return (
     <Card className={cn("shadow-card hover:shadow-card-hover transition-all duration-300", className)}>
       <CardContent className="p-6">
@@ -39,7 +50,7 @@ export function StatCard({
               </p>
             )}
           </div>
-          <div className={cn("p-3 rounded-xl bg-muted/50", iconColor.replace('text-', 'bg-').replace('primary', 'primary/10'))}>
+          <div className={cn("p-3 rounded-xl", getIconBackground(iconColor))}>
             <Icon className={cn("h-6 w-6", iconColor)} />
           </div>
         </div>

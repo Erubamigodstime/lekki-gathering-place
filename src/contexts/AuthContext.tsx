@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { User, UserRole } from '@/types';
 
 interface AuthContextType {
@@ -18,96 +18,124 @@ interface SignupData {
   role: UserRole;
   wardId: string;
   phone: string;
+  classId?: string; // Optional for instructor class assignment
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Mock users for demo
-const mockUsers: Record<string, User & { password: string }> = {
-  'admin@church.org': {
-    id: '1',
-    firstName: 'John',
-    lastName: 'Administrator',
-    email: 'admin@church.org',
-    password: 'admin123',
-    phone: '+1234567890',
-    role: 'admin',
-    wardId: '1',
-    profilePicture: '',
-    status: 'active',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  'instructor@church.org': {
-    id: '2',
-    firstName: 'Sarah',
-    lastName: 'Teacher',
-    email: 'instructor@church.org',
-    password: 'instructor123',
-    phone: '+1234567891',
-    role: 'instructor',
-    wardId: '1',
-    profilePicture: '',
-    status: 'active',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  'student@church.org': {
-    id: '3',
-    firstName: 'Michael',
-    lastName: 'Learner',
-    email: 'student@church.org',
-    password: 'student123',
-    phone: '+1234567892',
-    role: 'student',
-    wardId: '1',
-    profilePicture: '',
-    status: 'active',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-};
+// Backend API URL
+const API_BASE_URL = 'http://localhost:5000/api/v1';
+
+// Helper function for API calls
+async function apiCall(endpoint: string, options: RequestInit = {}) {
+  const token = localStorage.getItem('token');
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` }),
+      ...options.headers,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || 'An error occurred');
+  }
+
+  return data;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Check if user is already logged in on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const response = await apiCall('/auth/profile');
+          setUser(response.data);
+        } catch (error) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+        }
+      }
+      setLoading(false);
+    };
+    checkAuth();
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
-    
-    const mockUser = mockUsers[email];
-    if (mockUser && mockUser.password === password) {
-      const { password: _, ...userWithoutPassword } = mockUser;
-      setUser(userWithoutPassword);
-    } else {
-      throw new Error('Invalid email or password');
+    try {
+      console.log('Attempting login with:', { email, apiUrl: `${API_BASE_URL}/auth/login` });
+      const response = await apiCall('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+
+      console.log('Login response:', response);
+
+      // Store tokens
+      localStorage.setItem('accessToken', response.data.accessToken);
+      localStorage.setItem('refreshToken', response.data.refreshToken);
+      
+      // Store userId for API calls
+      if (response.data.user?.id) {
+        localStorage.setItem('userId', response.data.user.id);
+      }
+      
+      // Store token in axios-style for canvas-api
+      localStorage.setItem('token', response.data.accessToken);
+
+      // Set user
+      setUser(response.data.user);
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   const signup = useCallback(async (data: SignupData) => {
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
-    
-    const newUser: User = {
-      id: Date.now().toString(),
-      firstName: data.firstName,
-      lastName: data.lastName,
-      email: data.email,
-      phone: data.phone,
-      role: data.role,
-      wardId: data.wardId,
-      status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    
-    setUser(newUser);
-    setLoading(false);
+    try {
+      const response = await apiCall('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+
+      // Store tokens
+      localStorage.setItem('accessToken', response.data.accessToken);
+      localStorage.setItem('refreshToken', response.data.refreshToken);
+      
+      // Store userId for API calls
+      if (response.data.user?.id) {
+        localStorage.setItem('userId', response.data.user.id);
+      }
+      
+      // Store token in axios-style for canvas-api
+      localStorage.setItem('token', response.data.accessToken);
+
+      // Set user
+      setUser(response.data.user);
+    } catch (error) {
+      throw error;
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const logout = useCallback(() => {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('token');
     setUser(null);
   }, []);
 

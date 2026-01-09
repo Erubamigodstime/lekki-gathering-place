@@ -50,36 +50,32 @@ const adminNavItems = [
 const instructorNavItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'My Classes', url: '/my-classes', icon: BookOpen },
-  { title: 'Enrolled Classes', url: '/enrolled-classes', icon: GraduationCap },
+  { title: 'Enrollments', url: '/enrollment-approvals', icon: GraduationCap },
+  { title: 'Students', url: '/students', icon: Users },
   { title: 'Attendance', url: '/attendance', icon: ClipboardCheck },
-  { title: 'Calendar', url: '/calendar', icon: Calendar },
-  { title: 'Messages', url: '/messages', icon: MessageSquare },
   { title: 'Profile', url: '/profile', icon: UserCircle },
 ];
 
 const studentNavItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
-  { title: 'My Schedule', url: '/schedule', icon: Calendar },
-  { title: 'Browse Classes', url: '/browse-classes', icon: BookOpen },
-  { title: 'Attendance', url: '/attendance', icon: ClipboardCheck },
-  { title: 'Messages', url: '/messages', icon: MessageSquare },
+  { title: 'Browse Classes', url: '/classes', icon: BookOpen },
   { title: 'Profile', url: '/profile', icon: UserCircle },
 ];
 
 export function AppSidebar() {
   const { user, logout } = useAuth();
-  const { state } = useSidebar();
+  const { state, setOpenMobile, isMobile } = useSidebar();
   const location = useLocation();
   const collapsed = state === 'collapsed';
 
-  const navItems = user?.role === 'admin' 
+  const navItems = user?.role?.toLowerCase() === 'admin' 
     ? adminNavItems 
-    : user?.role === 'instructor' 
+    : user?.role?.toLowerCase() === 'instructor' 
       ? instructorNavItems 
       : studentNavItems;
 
   const getRoleLabel = () => {
-    switch (user?.role) {
+    switch (user?.role?.toLowerCase()) {
       case 'admin': return 'Administrator';
       case 'instructor': return 'Instructor';
       case 'student': return 'Student';
@@ -87,29 +83,37 @@ export function AppSidebar() {
     }
   };
 
+  // Close sidebar on mobile when navigation occurs
+  const handleNavClick = () => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  };
+
   return (
-    <Sidebar className="border-r border-sidebar-border">
-      <SidebarHeader className="p-4 border-b border-sidebar-border">
-        <ChurchLogo size="md" showText={!collapsed} />
+    <Sidebar className="border-r border-sidebar-border bg-sidebar-background">
+      <SidebarHeader className="p-6 border-b border-sidebar-border">
+        <ChurchLogo size="md" showText={!collapsed} textClassName="text-sidebar-foreground" />
       </SidebarHeader>
       
-      <SidebarContent className="px-2">
+      <SidebarContent className="px-3 py-4">
         <SidebarGroup>
-          <SidebarGroupLabel className="px-2 py-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            {!collapsed && 'Main Menu'}
+          <SidebarGroupLabel className="px-3 py-3 text-xs font-bold text-sidebar-foreground/60 uppercase tracking-widest">
+            {!collapsed && 'Navigation'}
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="space-y-1">
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink 
                       to={item.url} 
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-                      activeClassName="bg-primary text-primary-foreground hover:bg-primary/90"
+                      onClick={handleNavClick}
+                      className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all duration-200 font-medium"
+                      activeClassName="bg-sidebar-primary text-sidebar-primary-foreground shadow-lg hover:bg-sidebar-primary/90"
                     >
                       <item.icon className="h-5 w-5 flex-shrink-0" />
-                      {!collapsed && <span className="font-medium">{item.title}</span>}
+                      {!collapsed && <span className="text-sm">{item.title}</span>}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -119,26 +123,26 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="p-4 border-t border-sidebar-border">
+      <SidebarFooter className="p-4 border-t border-sidebar-border/50">
         {!collapsed ? (
           <div className="space-y-3">
-            <div className="flex items-center gap-3 p-2 rounded-lg bg-sidebar-accent">
-              <Avatar className="h-10 w-10">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-sidebar-accent border border-sidebar-border/30">
+              <Avatar className="h-11 w-11 ring-2 ring-sidebar-primary/20">
                 <AvatarImage src={user?.profilePicture} />
-                <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
+                <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground font-bold text-sm">
                   {user?.firstName?.[0]}{user?.lastName?.[0]}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-sidebar-foreground truncate">
+                <p className="text-sm font-bold text-sidebar-foreground truncate">
                   {user?.firstName} {user?.lastName}
                 </p>
-                <p className="text-xs text-muted-foreground">{getRoleLabel()}</p>
+                <p className="text-xs text-sidebar-foreground/60 font-medium">{getRoleLabel()}</p>
               </div>
             </div>
             <Button 
               variant="ghost" 
-              className="w-full justify-start text-muted-foreground hover:text-destructive"
+              className="w-full justify-start text-sidebar-foreground/70 hover:text-red-400 hover:bg-red-950/20 transition-colors"
               onClick={logout}
             >
               <LogOut className="mr-2 h-4 w-4" />

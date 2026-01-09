@@ -1,9 +1,8 @@
-import { useState } from 'react';
-import { Search, Filter, Check, X, Download, Calendar, Clock, Users } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Download, Calendar as CalendarIcon, Users, TrendingUp, Clock, Filter as FilterIcon, Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
@@ -20,98 +19,312 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Calendar } from '@/components/ui/calendar';
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
-import { useAuth } from '@/contexts/AuthContext';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
+import axios from 'axios';
 
-const mockAttendanceRecords = [
-  {
-    id: '1',
-    student: { name: 'John Smith', id: '1' },
-    class: 'Tailoring Basics',
-    instructor: 'Mary Johnson',
-    date: '2024-12-10',
-    time: '9:00 AM',
-    status: 'pending',
-    markedAt: '9:05 AM',
-  },
-  {
-    id: '2',
-    student: { name: 'Sarah Wilson', id: '2' },
-    class: 'Tailoring Basics',
-    instructor: 'Mary Johnson',
-    date: '2024-12-10',
-    time: '9:00 AM',
-    status: 'pending',
-    markedAt: '9:02 AM',
-  },
-  {
-    id: '3',
-    student: { name: 'Michael Brown', id: '3' },
-    class: 'Music Training',
-    instructor: 'David Williams',
-    date: '2024-12-10',
-    time: '2:00 PM',
-    status: 'approved',
-    markedAt: '2:01 PM',
-    approvedAt: '2:15 PM',
-  },
-  {
-    id: '4',
-    student: { name: 'Emily Davis', id: '4' },
-    class: 'Cooking Class',
-    instructor: 'Chef Roberts',
-    date: '2024-12-09',
-    time: '11:30 AM',
-    status: 'approved',
-    markedAt: '11:35 AM',
-    approvedAt: '11:45 AM',
-  },
-  {
-    id: '5',
-    student: { name: 'Robert Taylor', id: '5' },
-    class: 'Photography',
-    instructor: 'James Wilson',
-    date: '2024-12-09',
-    time: '3:00 PM',
-    status: 'rejected',
-    markedAt: '4:30 PM',
-    rejectedAt: '4:45 PM',
-    reason: 'Marked too late',
-  },
-];
+interface AttendanceRecord {
+  id: string;
+  date: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  markedAt: string;
+  class: {
+    id: string;
+    name: string;
+    instructor: {
+      user: {
+        firstName: string;
+        lastName: string;
+      };
+    };
+    ward: {
+      id: string;
+      name: string;
+    };
+  };
+  student: {
+    user: {
+      id: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string;
+      ward: {
+        id: string;
+        name: string;
+      };
+    };
+  };
+}
+
+interface AttendanceReport {
+  classId: string;
+  className: string;
+  instructorName: string;
+  totalAttendance: number;
+  approved: number;
+  pending: number;
+  rejected: number;
+  uniqueDates: number;
+}
+
+interface Ward {
+  id: string;
+  name: string;
+}
+
+interface Class {
+  id: string;
+  name: string;
+}
+
+type DateFilterType = 'day' | 'week' | 'month';
 
 export default function AttendancePage() {
-  const { user } = useAuth();
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [attendanceReport, setAttendanceReport] = useState<AttendanceReport[]>([]);
+  const [wards, setWards] = useState<Ward[]>([]);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reportLoading, setReportLoading] = useState(false);
+  
+  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('today');
-  const [activeTab, setActiveTab] = useState('all');
+  const [wardFilter, setWardFilter] = useState('all');
+  const [dateFilterType, setDateFilterType] = useState<DateFilterType>('month');
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
 
-  const filteredRecords = mockAttendanceRecords.filter(record => {
-    const matchesSearch = record.student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         record.class.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesClass = classFilter === 'all' || record.class === classFilter;
-    const matchesTab = activeTab === 'all' || record.status === activeTab;
-    return matchesSearch && matchesClass && matchesTab;
+  useEffect(() => {
+    fetchInitialData();
+  }, []);
+
+  useEffect(() => {
+    fetchAttendanceData();
+    fetchAttendanceReport();
+  }, [classFilter, wardFilter, dateFilterType, selectedDate]);
+
+  const fetchInitialData = async () => {
+    await Promise.all([
+      fetchWards(),
+      fetchClasses(),
+    ]);
+  };
+
+  const fetchWards = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get('http://localhost:5000/api/v1/wards', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setWards(Array.isArray(response.data.data) ? response.data.data : []);
+    } catch (error) {
+      console.error('Error fetching wards:', error);
+      setWards([]);
+    }
+  };
+
+  const fetchClasses = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get('http://localhost:5000/api/v1/classes', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const classData = response.data.data;
+      setClasses(Array.isArray(classData) ? classData : (classData?.data || []));
+    } catch (error) {
+      console.error('Error fetching classes:', error);
+      setClasses([]);
+    }
+  };
+
+  const getDateRange = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    switch (dateFilterType) {
+      case 'day':
+        if (selectedDate) {
+          const dayDate = new Date(selectedDate);
+          dayDate.setHours(0, 0, 0, 0);
+          return { startDate: dayDate.toISOString(), endDate: dayDate.toISOString() };
+        }
+        return { startDate: today.toISOString(), endDate: today.toISOString() };
+      case 'week':
+        const weekStart = startOfWeek(selectedDate || today, { weekStartsOn: 0 });
+        const weekEnd = endOfWeek(selectedDate || today, { weekStartsOn: 0 });
+        return { startDate: weekStart.toISOString(), endDate: weekEnd.toISOString() };
+      case 'month':
+        const monthStart = startOfMonth(selectedDate || today);
+        const monthEnd = endOfMonth(selectedDate || today);
+        return { startDate: monthStart.toISOString(), endDate: monthEnd.toISOString() };
+      default:
+        return { startDate: today.toISOString(), endDate: today.toISOString() };
+    }
+  };
+
+  const fetchAttendanceData = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      console.log('Fetching attendance data with token:', token ? 'Token exists' : 'No token');
+      
+      const { startDate, endDate } = getDateRange();
+      
+      const params: any = {};
+      
+      // Only add date filters if not fetching all data
+      if (dateFilterType !== 'month' || classFilter !== 'all' || wardFilter !== 'all') {
+        params.startDate = startDate;
+        params.endDate = endDate;
+      }
+      
+      if (classFilter !== 'all') params.classId = classFilter;
+      if (wardFilter !== 'all') params.wardId = wardFilter;
+
+      console.log('Attendance API params:', params);
+      const response = await axios.get('http://localhost:5000/api/v1/attendance', {
+        headers: { Authorization: `Bearer ${token}` },
+        params
+      });
+
+      console.log('Attendance API response:', response.data);
+      console.log('Attendance records count:', response.data.data?.length || 0);
+      setAttendanceRecords(response.data.data || []);
+    } catch (error) {
+      console.error('Error fetching attendance:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('API error response:', error.response?.data);
+        console.error('API error status:', error.response?.status);
+      }
+      setAttendanceRecords([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAttendanceReport = async () => {
+    try {
+      setReportLoading(true);
+      const token = localStorage.getItem('token');
+      const { startDate, endDate } = getDateRange();
+      
+      const params: any = {
+        groupBy: 'class'
+      };
+      
+      // Only add date filters if not fetching all data
+      if (dateFilterType !== 'month' || classFilter !== 'all' || wardFilter !== 'all') {
+        params.startDate = startDate;
+        params.endDate = endDate;
+      }
+      
+      if (classFilter !== 'all') params.classId = classFilter;
+      if (wardFilter !== 'all') params.wardId = wardFilter;
+
+      console.log('Report API params:', params);
+      const response = await axios.get('http://localhost:5000/api/v1/attendance/report', {
+        headers: { Authorization: `Bearer ${token}` },
+        params
+      });
+
+      console.log('Report API response:', response.data);
+      console.log('Report data:', response.data.data);
+      setAttendanceReport(response.data.data.data || []);
+    } catch (error) {
+      console.error('Error fetching attendance report:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Report API error:', error.response?.data);
+      }
+      setAttendanceReport([]);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const exportToCSV = () => {
+    const { startDate, endDate } = getDateRange();
+    const dateStr = dateFilterType === 'day' && selectedDate 
+      ? format(selectedDate, 'yyyy-MM-dd')
+      : `${format(new Date(startDate), 'yyyy-MM-dd')}_to_${format(new Date(endDate), 'yyyy-MM-dd')}`;
+    
+    // Export detailed records with all filter information
+    const headers = [
+      'Student Name',
+      'Student Email',
+      'Student Phone',
+      'Student Ward',
+      'Class',
+      'Instructor',
+      'Class Ward',
+      'Date',
+      'Time Marked',
+      'Status'
+    ];
+    
+    // CSV Rows from filtered records
+    const rows = filteredRecords.map(record => [
+      `${record.student.user.firstName} ${record.student.user.lastName}`,
+      record.student.user.email,
+      record.student.user.phone || 'N/A',
+      record.student.user.ward.name,
+      record.class.name,
+      `${record.class.instructor.user.firstName} ${record.class.instructor.user.lastName}`,
+      record.class.ward.name,
+      format(new Date(record.date), 'MMM dd, yyyy'),
+      format(new Date(record.markedAt), 'hh:mm a'),
+      record.status
+    ]);
+    
+    // Combine headers and rows
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+    
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `attendance_detailed_${dateStr}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const filteredRecords = attendanceRecords.filter(record => {
+    if (!record?.student?.user || !record?.class) return false;
+    const studentName = `${record.student.user.firstName} ${record.student.user.lastName}`.toLowerCase();
+    const className = record.class.name.toLowerCase();
+    const matchesSearch = studentName.includes(searchQuery.toLowerCase()) ||
+                         className.includes(searchQuery.toLowerCase()) ||
+                         record.student.user.email.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesSearch;
   });
 
-  const pendingCount = mockAttendanceRecords.filter(r => r.status === 'pending').length;
-  const approvedToday = mockAttendanceRecords.filter(r => r.status === 'approved' && r.date === '2024-12-10').length;
-  const rejectedToday = mockAttendanceRecords.filter(r => r.status === 'rejected' && r.date === '2024-12-10').length;
+  const stats = {
+    total: attendanceRecords.length,
+    pending: attendanceRecords.filter(r => r.status === 'PENDING').length,
+    approved: attendanceRecords.filter(r => r.status === 'APPROVED').length,
+    rejected: attendanceRecords.filter(r => r.status === 'REJECTED').length,
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'approved':
-        return <Badge className="bg-green-100 text-green-700">Approved</Badge>;
-      case 'pending':
-        return <Badge className="bg-amber-100 text-amber-700">Pending</Badge>;
-      case 'rejected':
-        return <Badge className="bg-red-100 text-red-700">Rejected</Badge>;
+      case 'APPROVED':
+        return <Badge className="bg-green-100 text-green-700 border-green-200">Approved</Badge>;
+      case 'PENDING':
+        return <Badge className="bg-amber-100 text-amber-700 border-amber-200">Pending</Badge>;
+      case 'REJECTED':
+        return <Badge className="bg-red-100 text-red-700 border-red-200">Rejected</Badge>;
       default:
         return <Badge variant="secondary">{status}</Badge>;
     }
@@ -122,198 +335,323 @@ export default function AttendancePage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-serif font-bold text-foreground">Attendance Management</h1>
+          <h1 className="text-3xl font-serif font-bold text-foreground">Attendance Analytics</h1>
           <p className="text-muted-foreground mt-1">
-            {user?.role === 'admin' ? 'Review and manage all attendance records' : 'Approve or reject student attendance'}
+            Comprehensive attendance tracking and reporting system
           </p>
         </div>
-        <Button variant="outline">
+        <Button 
+          onClick={exportToCSV}
+          className="bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-700"
+          disabled={filteredRecords.length === 0}
+        >
           <Download className="mr-2 h-4 w-4" />
-          Export Report
+          Export to CSV
         </Button>
       </div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="shadow-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-amber-100">
-                <Clock className="h-5 w-5 text-amber-600" />
-              </div>
+        <Card className="shadow-card border-l-4 border-l-blue-500">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold text-foreground">{pendingCount}</p>
-                <p className="text-sm text-muted-foreground">Pending Approval</p>
+                <p className="text-sm font-medium text-muted-foreground">Total Records</p>
+                <p className="text-3xl font-bold text-foreground mt-1">{stats.total}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-gradient-to-br from-blue-100 to-blue-200">
+                <Users className="h-6 w-6 text-blue-600" />
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="shadow-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-green-100">
-                <Check className="h-5 w-5 text-green-600" />
-              </div>
+
+        <Card className="shadow-card border-l-4 border-l-amber-500">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold text-foreground">{approvedToday}</p>
-                <p className="text-sm text-muted-foreground">Approved Today</p>
+                <p className="text-sm font-medium text-muted-foreground">Pending</p>
+                <p className="text-3xl font-bold text-foreground mt-1">{stats.pending}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-gradient-to-br from-amber-100 to-amber-200">
+                <AlertCircle className="h-6 w-6 text-amber-600" />
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="shadow-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-red-100">
-                <X className="h-5 w-5 text-red-600" />
-              </div>
+
+        <Card className="shadow-card border-l-4 border-l-green-500">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold text-foreground">{rejectedToday}</p>
-                <p className="text-sm text-muted-foreground">Rejected Today</p>
+                <p className="text-sm font-medium text-muted-foreground">Approved</p>
+                <p className="text-3xl font-bold text-foreground mt-1">{stats.approved}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-gradient-to-br from-green-100 to-green-200">
+                <CheckCircle2 className="h-6 w-6 text-green-600" />
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="shadow-card">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Users className="h-5 w-5 text-primary" />
-              </div>
+
+        <Card className="shadow-card border-l-4 border-l-red-500">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-2xl font-bold text-foreground">{mockAttendanceRecords.length}</p>
-                <p className="text-sm text-muted-foreground">Total Records</p>
+                <p className="text-sm font-medium text-muted-foreground">Rejected</p>
+                <p className="text-3xl font-bold text-foreground mt-1">{stats.rejected}</p>
+              </div>
+              <div className="p-3 rounded-lg bg-gradient-to-br from-red-100 to-red-200">
+                <XCircle className="h-6 w-6 text-red-600" />
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
-
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full max-w-lg grid-cols-4">
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="pending" className="relative">
-            Pending
-            {pendingCount > 0 && (
-              <span className="ml-2 bg-accent text-accent-foreground text-xs rounded-full px-1.5 py-0.5">
-                {pendingCount}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="approved">Approved</TabsTrigger>
-          <TabsTrigger value="rejected">Rejected</TabsTrigger>
-        </TabsList>
-      </Tabs>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by student or class..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <Select value={classFilter} onValueChange={setClassFilter}>
-          <SelectTrigger className="w-full sm:w-48">
-            <Filter className="mr-2 h-4 w-4" />
-            <SelectValue placeholder="Filter by class" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Classes</SelectItem>
-            <SelectItem value="Tailoring Basics">Tailoring Basics</SelectItem>
-            <SelectItem value="Music Training">Music Training</SelectItem>
-            <SelectItem value="Cooking Class">Cooking Class</SelectItem>
-            <SelectItem value="Photography">Photography</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={dateFilter} onValueChange={setDateFilter}>
-          <SelectTrigger className="w-full sm:w-40">
-            <Calendar className="mr-2 h-4 w-4" />
-            <SelectValue placeholder="Date" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="yesterday">Yesterday</SelectItem>
-            <SelectItem value="week">This Week</SelectItem>
-            <SelectItem value="month">This Month</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      <Card className="shadow-card">
+        <CardHeader className="bg-gradient-to-r from-primary/5 via-purple-50 to-blue-50">
+          <CardTitle className="flex items-center gap-2">
+            <FilterIcon className="h-5 w-5" />
+            Advanced Filters
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6">
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-5">
+            {/* Date Filter Type */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Time Period</label>
+              <Select value={dateFilterType} onValueChange={(value: DateFilterType) => setDateFilterType(value)}>
+                <SelectTrigger className="border-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="day">Day</SelectItem>
+                  <SelectItem value="week">Week</SelectItem>
+                  <SelectItem value="month">Month</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-      {/* Attendance Table */}
-      <div className="bg-card rounded-lg border border-border overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Student</TableHead>
-              <TableHead>Class</TableHead>
-              <TableHead>Instructor</TableHead>
-              <TableHead>Date & Time</TableHead>
-              <TableHead>Marked At</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-32">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredRecords.map((record, index) => (
-              <TableRow 
-                key={record.id}
-                className="animate-slide-up"
-                style={{ animationDelay: `${index * 0.05}s` }}
-              >
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    <Avatar className="h-9 w-9">
-                      <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
-                        {record.student.name.split(' ').map(n => n[0]).join('')}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="font-medium text-foreground">{record.student.name}</span>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline">{record.class}</Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{record.instructor}</TableCell>
-                <TableCell>
-                  <div className="text-sm">
-                    <p className="font-medium text-foreground">{record.date}</p>
-                    <p className="text-muted-foreground">{record.time}</p>
-                  </div>
-                </TableCell>
-                <TableCell className="text-muted-foreground">{record.markedAt}</TableCell>
-                <TableCell>{getStatusBadge(record.status)}</TableCell>
-                <TableCell>
-                  {record.status === 'pending' ? (
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="outline" className="h-8 text-green-600 border-green-600 hover:bg-green-50">
-                        <Check className="h-3 w-3" />
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-8 text-destructive border-destructive hover:bg-destructive/10">
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      {record.status === 'approved' ? `at ${record.approvedAt}` : record.reason}
-                    </span>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            {/* Date Picker - shows for Day selection */}
+            {dateFilterType === 'day' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground">Select Date</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal border-2">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {selectedDate ? format(selectedDate, 'PPP') : 'Pick a date'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={setSelectedDate}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
 
-      {filteredRecords.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">No attendance records found matching your criteria.</p>
-        </div>
-      )}
+            {/* Class Filter */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Class</label>
+              <Select value={classFilter} onValueChange={setClassFilter}>
+                <SelectTrigger className="border-2">
+                  <SelectValue placeholder="All Classes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Classes</SelectItem>
+                  {classes.map(cls => (
+                    <SelectItem key={cls.id} value={cls.id}>{cls.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Ward Filter */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Ward</label>
+              <Select value={wardFilter} onValueChange={setWardFilter}>
+                <SelectTrigger className="border-2">
+                  <SelectValue placeholder="All Wards" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Wards</SelectItem>
+                  {wards.map(ward => (
+                    <SelectItem key={ward.id} value={ward.id}>{ward.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Search */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Search</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Student, class..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 border-2"
+                />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Attendance Report Table */}
+      <Card className="shadow-card">
+        <CardHeader className="bg-gradient-to-r from-primary/5 via-purple-50 to-blue-50">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Attendance Summary by Class
+            </CardTitle>
+            {reportLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {reportLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : attendanceReport.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p>No attendance data found for selected filters</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gradient-to-r from-primary/10 via-purple-50 to-blue-50 hover:from-primary/15 hover:via-purple-100 hover:to-blue-100">
+                    <TableHead className="font-bold text-foreground">Class</TableHead>
+                    <TableHead className="font-bold text-foreground">Instructor</TableHead>
+                    <TableHead className="font-bold text-foreground text-center">Total</TableHead>
+                    <TableHead className="font-bold text-foreground text-center">Approved</TableHead>
+                    <TableHead className="font-bold text-foreground text-center">Pending</TableHead>
+                    <TableHead className="font-bold text-foreground text-center">Rejected</TableHead>
+                    <TableHead className="font-bold text-foreground text-center">Dates</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {attendanceReport.map((record, index) => (
+                    <TableRow 
+                      key={record.classId}
+                      className={index % 2 === 0 ? 'bg-white hover:bg-blue-50/50' : 'bg-blue-50/30 hover:bg-blue-50/50'}
+                    >
+                      <TableCell className="font-medium">{record.className}</TableCell>
+                      <TableCell>{record.instructorName}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                          {record.totalAttendance}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge className="bg-green-100 text-green-700 border-green-200">
+                          {record.approved}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge className="bg-amber-100 text-amber-700 border-amber-200">
+                          {record.pending}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge className="bg-red-100 text-red-700 border-red-200">
+                          {record.rejected}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                          {record.uniqueDates}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Detailed Records Table */}
+      <Card className="shadow-card">
+        <CardHeader className="bg-gradient-to-r from-primary/5 via-purple-50 to-blue-50">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5" />
+              Detailed Attendance Records
+            </CardTitle>
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : filteredRecords.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p>No attendance records found</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gradient-to-r from-primary/10 via-purple-50 to-blue-50 hover:from-primary/15 hover:via-purple-100 hover:to-blue-100">
+                    <TableHead className="font-bold text-foreground">Student</TableHead>
+                    <TableHead className="font-bold text-foreground">Class</TableHead>
+                    <TableHead className="font-bold text-foreground">Instructor</TableHead>
+                    <TableHead className="font-bold text-foreground">Ward</TableHead>
+                    <TableHead className="font-bold text-foreground">Date</TableHead>
+                    <TableHead className="font-bold text-foreground">Time</TableHead>
+                    <TableHead className="font-bold text-foreground">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredRecords.map((record, index) => (
+                    <TableRow 
+                      key={record.id}
+                      className={index % 2 === 0 ? 'bg-white hover:bg-blue-50/50' : 'bg-blue-50/30 hover:bg-blue-50/50'}
+                    >
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">
+                            {record.student.user.firstName} {record.student.user.lastName}
+                          </p>
+                          <p className="text-sm text-muted-foreground">{record.student.user.email}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">{record.class.name}</TableCell>
+                      <TableCell>
+                        {record.class.instructor.user.firstName} {record.class.instructor.user.lastName}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
+                          {record.student.user.ward.name}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{format(new Date(record.date), 'MMM dd, yyyy')}</TableCell>
+                      <TableCell>{format(new Date(record.markedAt), 'hh:mm a')}</TableCell>
+                      <TableCell>{getStatusBadge(record.status)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

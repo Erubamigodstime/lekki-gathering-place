@@ -1,0 +1,551 @@
+import { useState, useEffect } from 'react';
+import { Search, Check, X, Clock, Users, Calendar as CalendarIcon, CheckCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+
+interface AttendanceRecord {
+  id: string;
+  date: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  notes?: string;
+  rejectionReason?: string;
+  student: {
+    id: string;
+    user: {
+      firstName: string;
+      lastName: string;
+      email: string;
+    };
+  };
+  class: {
+    id: string;
+    name: string;
+  };
+}
+
+interface InstructorClass {
+  id: string;
+  name: string;
+}
+
+export default function InstructorAttendancePage() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+  const [classes, setClasses] = useState<InstructorClass[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [classFilter, setClassFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<AttendanceRecord | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [processingId, setProcessingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchInstructorClasses();
+  }, []);
+
+  useEffect(() => {
+    if (classes.length > 0) {
+      fetchAttendanceRecords();
+    }
+  }, [classes, classFilter, statusFilter]);
+
+  const fetchInstructorClasses = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await axios.get(`${API_URL}/classes`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const allClasses = response.data.data?.data || response.data.data || [];
+      const instructorClasses = allClasses.filter((cls: any) => 
+        cls.instructor?.userId === user?.id
+      );
+
+      setClasses(instructorClasses.map((cls: any) => ({
+        id: cls.id,
+        name: cls.name
+      })));
+    } catch (error) {
+      console.error('Failed to fetch classes:', error);
+    }
+  };
+
+  const fetchAttendanceRecords = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const params: any = {};
+      if (statusFilter !== 'all') {
+        params.status = statusFilter.toUpperCase();
+      }
+
+      const response = await axios.get(`${API_URL}/attendance`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params
+      });
+
+      const allAttendance = response.data.data || [];
+      
+      // Filter for instructor's classes only
+      const classIds = classes.map(c => c.id);
+      const instructorAttendance = allAttendance.filter((record: AttendanceRecord) =>
+        classIds.includes(record.class.id)
+      );
+
+      setAttendanceRecords(instructorAttendance);
+    } catch (error) {
+      console.error('Failed to fetch attendance:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch attendance records',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApprove = async (recordId: string) => {
+    try {
+      setProcessingId(recordId);
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      await axios.patch(
+        `${API_URL}/attendance/${recordId}/approve`,
+        { status: 'APPROVED' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Update the record status in the list
+      setAttendanceRecords(prev => 
+        prev.map(r => r.id === recordId ? { ...r, status: 'APPROVED' } : r)
+      );
+
+      toast({
+        title: 'Success',
+        description: 'Attendance approved successfully',
+      });
+    } catch (error: any) {
+      console.error('Failed to approve attendance:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to approve attendance',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!selectedRecord || !rejectionReason.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Please provide a reason for rejection',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setProcessingId(selectedRecord.id);
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      await axios.patch(
+        `${API_URL}/attendance/${selectedRecord.id}/approve`,
+        { 
+          status: 'REJECTED',
+          rejectionReason: rejectionReason
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Update the record status in the list
+      setAttendanceRecords(prev => 
+        prev.map(r => r.id === selectedRecord.id 
+          ? { ...r, status: 'REJECTED', rejectionReason } 
+          : r)
+      );
+
+      toast({
+        title: 'Success',
+        description: 'Attendance rejected',
+      });
+
+      setRejectDialogOpen(false);
+      setSelectedRecord(null);
+      setRejectionReason('');
+    } catch (error: any) {
+      console.error('Failed to reject attendance:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.message || 'Failed to reject attendance',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const openRejectDialog = (record: AttendanceRecord) => {
+    setSelectedRecord(record);
+    setRejectDialogOpen(true);
+  };
+
+  const filteredRecords = attendanceRecords.filter(record => {
+    const studentName = `${record.student.user.firstName} ${record.student.user.lastName}`.toLowerCase();
+    const matchesSearch = studentName.includes(searchQuery.toLowerCase()) ||
+                         record.class.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesClass = classFilter === 'all' || record.class.id === classFilter;
+    const matchesStatus = statusFilter === 'all' || record.status === statusFilter.toUpperCase();
+    return matchesSearch && matchesClass && matchesStatus;
+  });
+
+  const pendingCount = attendanceRecords.filter(r => r.status === 'PENDING').length;
+  const approvedCount = attendanceRecords.filter(r => r.status === 'APPROVED').length;
+  const rejectedCount = attendanceRecords.filter(r => r.status === 'REJECTED').length;
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short',
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+  };
+
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-serif font-bold text-foreground">Attendance Records</h1>
+          <p className="text-muted-foreground mt-1">
+            View and manage student attendance for your classes
+          </p>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid gap-4 sm:grid-cols-4">
+        <Card className="shadow-card border-l-4 border-l-amber-500">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Pending</CardTitle>
+            <Clock className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">{pendingCount}</div>
+            <p className="text-xs text-muted-foreground">
+              Awaiting review
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card border-l-4 border-l-green-500">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Approved</CardTitle>
+            <Check className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{approvedCount}</div>
+            <p className="text-xs text-muted-foreground">
+              Successfully approved
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card border-l-4 border-l-red-500">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Rejected</CardTitle>
+            <X className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{rejectedCount}</div>
+            <p className="text-xs text-muted-foreground">
+              Not approved
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card border-l-4 border-l-blue-500">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Records</CardTitle>
+            <Users className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{attendanceRecords.length}</div>
+            <p className="text-xs text-muted-foreground">
+              All attendance
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by student name or class..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-full sm:w-48">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="approved">Approved</SelectItem>
+            <SelectItem value="rejected">Rejected</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={classFilter} onValueChange={setClassFilter}>
+          <SelectTrigger className="w-full sm:w-48">
+            <SelectValue placeholder="Filter by class" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Classes</SelectItem>
+            {classes.map(cls => (
+              <SelectItem key={cls.id} value={cls.id}>{cls.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Attendance Table */}
+      <Card className="shadow-card">
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">Loading attendance records...</p>
+            </div>
+          ) : filteredRecords.length === 0 ? (
+            <div className="text-center py-12">
+              <Users className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+              <p className="text-muted-foreground mb-2 font-semibold">No records found</p>
+              <p className="text-sm text-muted-foreground">
+                {attendanceRecords.length === 0 
+                  ? "No attendance records available"
+                  : "No records match your search criteria"}
+              </p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Student</TableHead>
+                  <TableHead>Class</TableHead>
+                  <TableHead>Date & Time</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Notes</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredRecords.map((record) => (
+                  <TableRow key={record.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-9 w-9">
+                          <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                            {record.student.user.firstName[0]}{record.student.user.lastName[0]}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-medium text-sm">
+                            {record.student.user.firstName} {record.student.user.lastName}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {record.student.user.email}
+                          </p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="font-medium">
+                        {record.class.name}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">{formatDate(record.date)}</span>
+                        <span className="text-xs text-muted-foreground">{formatTime(record.date)}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {record.status === 'PENDING' && (
+                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300">
+                          <Clock className="h-3 w-3 mr-1" />
+                          Pending
+                        </Badge>
+                      )}
+                      {record.status === 'APPROVED' && (
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
+                          <Check className="h-3 w-3 mr-1" />
+                          Approved
+                        </Badge>
+                      )}
+                      {record.status === 'REJECTED' && (
+                        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">
+                          <X className="h-3 w-3 mr-1" />
+                          Rejected
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {record.rejectionReason ? (
+                        <p className="text-sm text-red-600 max-w-xs truncate">
+                          {record.rejectionReason}
+                        </p>
+                      ) : record.notes ? (
+                        <p className="text-sm text-muted-foreground max-w-xs truncate">
+                          {record.notes}
+                        </p>
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">No notes</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {record.status === 'PENDING' ? (
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="bg-green-600 hover:bg-green-700"
+                            onClick={() => handleApprove(record.id)}
+                            disabled={processingId === record.id}
+                          >
+                            <Check className="h-4 w-4 mr-1" />
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => openRejectDialog(record)}
+                            disabled={processingId === record.id}
+                          >
+                            <X className="h-4 w-4 mr-1" />
+                            Reject
+                          </Button>
+                        </div>
+                      ) : (
+                        <Badge variant="secondary" className="text-xs">
+                          {record.status === 'APPROVED' ? 'Completed' : 'Processed'}
+                        </Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Reject Dialog */}
+      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Attendance</DialogTitle>
+            <DialogDescription>
+              Please provide a reason for rejecting this attendance record.
+              The student will be notified.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {selectedRecord && (
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-sm font-medium">
+                  {selectedRecord.student.user.firstName} {selectedRecord.student.user.lastName}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedRecord.class.name} • {formatDate(selectedRecord.date)}
+                </p>
+              </div>
+            )}
+            <Textarea
+              placeholder="Enter rejection reason (e.g., Marked too late, Not present in class)"
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              rows={4}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRejectDialogOpen(false);
+                setSelectedRecord(null);
+                setRejectionReason('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleReject}
+              disabled={!rejectionReason.trim() || processingId === selectedRecord?.id}
+            >
+              <X className="h-4 w-4 mr-2" />
+              Reject Attendance
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

@@ -1,11 +1,10 @@
-import { Cross } from 'lucide-react';
-
 interface ChurchLogoProps {
   size?: 'sm' | 'md' | 'lg';
   showText?: boolean;
+  textClassName?: string;
 }
 
-export function ChurchLogo({ size = 'md', showText = true }: ChurchLogoProps) {
+export function ChurchLogo({ size = 'md', showText = true, textClassName = 'text-foreground' }: ChurchLogoProps) {
   const sizeClasses = {
     sm: 'h-8 w-8',
     md: 'h-10 w-10',
@@ -19,18 +18,22 @@ export function ChurchLogo({ size = 'md', showText = true }: ChurchLogoProps) {
   };
 
   return (
-    <div className="flex items-center gap-3">
-      <div className={`${sizeClasses[size]} bg-gradient-primary rounded-xl flex items-center justify-center shadow-md`}>
-        <Cross className="text-primary-foreground" size={size === 'sm' ? 18 : size === 'md' ? 22 : 28} />
+    <div className="flex flex-col md:flex-row items-center gap-3">
+      <div className={`${sizeClasses[size]} bg-gray-900 rounded-xl overflow-hidden shadow-md flex items-center justify-center p-1`}>
+        <img 
+          src="/images/logo.png" 
+          alt="Lekki Gathering Place Logo" 
+          className="w-full h-full object-contain"
+        />
       </div>
       {showText && (
-        <div className="flex flex-col">
-          <span className={`${textSizeClasses[size]} font-serif font-bold text-foreground leading-tight`}>
-            SkillGather
+        <div className="flex flex-col text-center md:text-left">
+          <span className={`${textSizeClasses[size]} font-bold ${textClassName} leading-tight tracking-tight`}>
+            Lekki Gathering Place
           </span>
-          <span className="text-xs text-muted-foreground tracking-wide">
-            Church Training Center
-          </span>
+          {/* <span className="text-xs text-muted-foreground tracking-wide">
+            Learn by prayer and Faith 
+          </span> */}
         </div>
       )}
     </div>

@@ -43,34 +43,130 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-gradient-hero flex">
-      {/* Left Panel - Decorative */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-primary relative overflow-hidden">
-        <div className="absolute inset-0 bg-church-navy/20" />
-        <div className="relative z-10 flex flex-col justify-center px-16 text-primary-foreground">
-          <h1 className="text-5xl font-serif font-bold mb-6 animate-slide-up">
+      {/* Left Panel - Decorative with Animated Background */}
+      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
+        {/* Animated Background Layer */}
+        <div className="absolute inset-0 overflow-hidden bg-gradient-to-br from-slate-300 via-green-200/70 to-amber-200/70">
+          {/* Large visible gradient orbs */}
+          <div 
+            className="absolute w-[600px] h-[600px] rounded-full blur-3xl"
+            style={{
+              top: '10%',
+              left: '-10%',
+              background: 'radial-gradient(circle, rgba(27, 94, 61, 0.25) 0%, rgba(27, 94, 61, 0.12) 50%, transparent 100%)',
+              animation: 'floatSlow 15s ease-in-out infinite'
+            }}
+          />
+          <div 
+            className="absolute w-[500px] h-[500px] rounded-full blur-3xl"
+            style={{
+              bottom: '10%',
+              right: '-5%',
+              background: 'radial-gradient(circle, rgba(245, 176, 65, 0.3) 0%, rgba(245, 176, 65, 0.15) 50%, transparent 100%)',
+              animation: 'floatSlow 18s ease-in-out infinite',
+              animationDelay: '3s'
+            }}
+          />
+          <div 
+            className="absolute w-[450px] h-[450px] rounded-full blur-3xl"
+            style={{
+              top: '40%',
+              left: '30%',
+              background: 'radial-gradient(circle, rgba(27, 94, 61, 0.22) 0%, rgba(27, 94, 61, 0.1) 50%, transparent 100%)',
+              animation: 'floatSlow 20s ease-in-out infinite',
+              animationDelay: '6s'
+            }}
+          />
+          
+          {/* Visible floating particles */}
+          {[...Array(40)].map((_, i) => (
+            <div
+              key={`particle-${i}`}
+              className="absolute rounded-full"
+              style={{
+                width: `${(i % 4) + 4}px`,
+                height: `${(i % 4) + 4}px`,
+                left: `${(i * 13 + 7) % 95}%`,
+                top: `${(i * 19 + 5) % 90}%`,
+                background: i % 3 === 0 
+                  ? 'rgba(27, 94, 61, 0.7)' 
+                  : i % 3 === 1 
+                  ? 'rgba(245, 176, 65, 0.7)' 
+                  : 'rgba(148, 163, 184, 0.6)',
+                boxShadow: i % 3 === 0 
+                  ? '0 0 25px rgba(27, 94, 61, 0.8)' 
+                  : i % 3 === 1 
+                  ? '0 0 25px rgba(245, 176, 65, 0.8)' 
+                  : '0 0 18px rgba(148, 163, 184, 0.7)',
+                animation: `float3d ${(i % 12) + 8}s ease-in-out infinite`,
+                animationDelay: `${(i % 5)}s`,
+              }}
+            />
+          ))}
+          
+          {/* Floating geometric shapes */}
+          {[...Array(20)].map((_, i) => (
+            <div
+              key={`shape-${i}`}
+              className="absolute"
+              style={{
+                width: `${(i % 8) * 10 + 40}px`,
+                height: `${(i % 8) * 10 + 40}px`,
+                left: `${(i * 17 + 3) % 92}%`,
+                top: `${(i * 23 + 8) % 88}%`,
+                background: i % 2 === 0 
+                  ? 'linear-gradient(135deg, rgba(27, 94, 61, 0.18), rgba(27, 94, 61, 0.1))' 
+                  : 'linear-gradient(135deg, rgba(245, 176, 65, 0.18), rgba(245, 176, 65, 0.1))',
+                borderRadius: i % 3 === 0 ? '50%' : i % 3 === 1 ? '30%' : '15px',
+                border: i % 2 === 0 
+                  ? '2px solid rgba(27, 94, 61, 0.35)' 
+                  : '2px solid rgba(245, 176, 65, 0.35)',
+                animation: `floatRotate ${(i % 20) + 15}s ease-in-out infinite`,
+                animationDelay: `${(i % 8)}s`,
+              }}
+            />
+          ))}
+          
+          {/* Education/Skill Icons - floating */}
+          {['📚', '✏️', '🎓', '📖', '🏆', '⭐', '💡', '🎯', '📝', '🔧', '🎨', '💻', '🔨', '✨', '🌟'].map((icon, i) => (
+            <div
+              key={`icon-${i}`}
+              className="absolute text-2xl opacity-40"
+              style={{
+                left: `${(i * 23 + 5) % 95}%`,
+                top: `${(i * 17 + 10) % 85}%`,
+                filter: i % 2 === 0 ? 'hue-rotate(130deg)' : 'hue-rotate(40deg)',
+                animation: `float3d ${(i % 5) * 3 + 10}s ease-in-out infinite`,
+                animationDelay: `${(i % 6)}s`,
+              }}
+            >
+              {icon}
+            </div>
+          ))}
+        </div>
+        <div className="relative z-10 flex flex-col justify-center px-16 text-gathering-dark">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold leading-tight mb-6 animate-slide-up text-gathering-dark">
             Grow in Faith,<br />
-            <span className="text-church-gold-light">Develop Skills</span>
+            <span className="text-gathering-yellow">Develop Skills</span>
           </h1>
-          <p className="text-lg opacity-90 max-w-md animate-slide-up" style={{ animationDelay: '0.1s' }}>
+          <p className="text-base sm:text-lg max-w-md animate-slide-up text-gathering-dark/70" style={{ animationDelay: '0.1s' }}>
             Join our community of learners and instructors dedicated to nurturing talents for the glory of God.
           </p>
           <div className="mt-12 flex gap-8 animate-slide-up" style={{ animationDelay: '0.2s' }}>
             <div>
-              <div className="text-4xl font-bold text-church-gold-light">500+</div>
-              <div className="text-sm opacity-80">Active Students</div>
+              <div className="text-4xl font-bold text-gathering-yellow">30+</div>
+              <div className="text-sm text-gathering-dark/70">Active Students</div>
             </div>
             <div>
-              <div className="text-4xl font-bold text-church-gold-light">50+</div>
-              <div className="text-sm opacity-80">Skilled Instructors</div>
+              <div className="text-4xl font-bold text-gathering-yellow">7</div>
+              <div className="text-sm text-gathering-dark/70">Skilled Instructors</div>
             </div>
             <div>
-              <div className="text-4xl font-bold text-church-gold-light">30+</div>
-              <div className="text-sm opacity-80">Skill Courses</div>
+              <div className="text-4xl font-bold text-gathering-yellow">8</div>
+              <div className="text-sm text-gathering-dark/70">Skill Courses</div>
             </div>
           </div>
         </div>
-        <div className="absolute bottom-0 right-0 w-96 h-96 bg-church-gold/10 rounded-full blur-3xl" />
-        <div className="absolute top-20 right-20 w-64 h-64 bg-primary-foreground/5 rounded-full blur-2xl" />
       </div>
 
       {/* Right Panel - Login Form */}

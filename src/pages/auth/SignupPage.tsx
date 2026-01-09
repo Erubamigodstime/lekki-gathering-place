@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock, User, Phone, MapPin, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,15 +10,25 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { UserRole } from '@/types';
 
-const wards = [
-  { id: '1', name: 'Central Ward' },
-  { id: '2', name: 'North Ward' },
-  { id: '3', name: 'South Ward' },
-  { id: '4', name: 'East Ward' },
-  { id: '5', name: 'West Ward' },
-];
+interface Ward {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+}
+
+interface Class {
+  id: string;
+  name: string;
+  instructorName: string;
+  instructorProfileSlug: string;
+}
 
 export default function SignupPage() {
+  const [wards, setWards] = useState<Ward[]>([]);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [loadingWards, setLoadingWards] = useState(true);
+  const [loadingClasses, setLoadingClasses] = useState(true);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -28,40 +38,198 @@ export default function SignupPage() {
     role: '' as UserRole | '',
     wardId: '',
     phone: '',
+    classId: '', // For instructor class selection
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const { signup, loading } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  // Validation helpers
+  const validateEmail = (email: string): string | null => {
+    if (!email) return 'Email is required';
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) return 'Please provide a valid email';
+    return null;
+  };
+
+  const validatePassword = (password: string): string | null => {
+    if (!password) return 'Password is required';
+    if (password.length < 8) return 'Password must be at least 8 characters long';
+    if (!/(?=.*[a-z])/.test(password)) return 'Password must contain at least one lowercase letter';
+    if (!/(?=.*[A-Z])/.test(password)) return 'Password must contain at least one uppercase letter';
+    if (!/(?=.*\d)/.test(password)) return 'Password must contain at least one number';
+    return null;
+  };
+
+  const isValidUUID = (uuid: string): boolean => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(uuid);
+  };
+
+  const validateField = (field: string, value: string) => {
+    let error: string | null = null;
+
+    switch (field) {
+      case 'email':
+        error = validateEmail(value);
+        break;
+      case 'password':
+        error = validatePassword(value);
+        break;
+      case 'confirmPassword':
+        if (value !== formData.password) error = 'Passwords do not match';
+        break;
+      case 'firstName':
+        if (!value.trim()) error = 'First name is required';
+        break;
+      case 'lastName':
+        if (!value.trim()) error = 'Last name is required';
+        break;
+      case 'phone':
+        if (!value.trim()) error = 'Phone number is required';
+        break;
+      case 'role':
+        if (!value) error = 'Role is required';
+        break;
+      case 'wardId':
+        if (!value) error = 'Ward selection is required';
+        else if (!isValidUUID(value)) error = 'Valid ward ID is required';
+        break;
+      case 'classId':
+        if (value && !isValidUUID(value)) error = 'Valid class ID is required';
+        break;
+    }
+
+    setValidationErrors(prev => ({
+      ...prev,
+      [field]: error || ''
+    }));
+  };
+
+  // Fetch wards from backend
+  useEffect(() => {
+    const fetchWards = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/v1/wards');
+        const data = await response.json();
+        if (data.success) {
+          setWards(data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching wards:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load wards. Please refresh the page.',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoadingWards(false);
+      }
+    };
+    fetchWards();
+  }, [toast]);
+
+  // Fetch classes for instructor selection
+  useEffect(() => {
+    const fetchClasses = async () => {
+      try {
+        console.log('Fetching classes from API...');
+        const response = await fetch('http://localhost:5000/api/v1/classes');
+        console.log('Classes API response status:', response.status);
+        const result = await response.json();
+        console.log('Classes API result:', result);
+        if (result.success && result.data) {
+          // Handle paginated response structure
+          const classesArray = result.data.data || result.data;
+          console.log('Setting classes:', classesArray.length, 'classes');
+          setClasses(classesArray);
+        }
+      } catch (error) {
+        console.error('Error fetching classes:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load classes. Please refresh the page.',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoadingClasses(false);
+      }
+    };
+    fetchClasses();
+  }, [toast]);
+
   const handleChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    // Clear validation error when user starts typing
+    if (validationErrors[field]) {
+      setValidationErrors(prev => ({ ...prev, [field]: '' }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Validate all fields
+    const errors: Record<string, string> = {};
+    
+    const emailError = validateEmail(formData.email);
+    if (emailError) errors.email = emailError;
+    
+    const passwordError = validatePassword(formData.password);
+    if (passwordError) errors.password = passwordError;
+    
     if (formData.password !== formData.confirmPassword) {
+      errors.confirmPassword = 'Passwords do not match';
+    }
+    
+    if (!formData.firstName.trim()) errors.firstName = 'First name is required';
+    if (!formData.lastName.trim()) errors.lastName = 'Last name is required';
+    if (!formData.phone.trim()) errors.phone = 'Phone number is required';
+    if (!formData.role) errors.role = 'Role is required';
+    
+    // Validate wardId (must be UUID)
+    if (!formData.wardId) {
+      errors.wardId = 'Ward selection is required';
+    } else if (!isValidUUID(formData.wardId)) {
+      errors.wardId = 'Valid ward ID is required';
+    }
+    
+    // Validate classId for instructors (optional but must be UUID if provided)
+    if (formData.role === 'INSTRUCTOR' && formData.classId && !isValidUUID(formData.classId)) {
+      errors.classId = 'Valid class ID is required';
+    }
+    
+    // Check for validation errors
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
       toast({
-        title: 'Password mismatch',
-        description: 'Passwords do not match. Please try again.',
+        title: 'Validation Error',
+        description: 'Please fix the errors in the form before submitting.',
         variant: 'destructive',
       });
       return;
     }
 
-    if (!formData.role) {
-      toast({
-        title: 'Role required',
-        description: 'Please select your role.',
-        variant: 'destructive',
-      });
-      return;
+    // Validate instructor class selection
+    if (formData.role === 'INSTRUCTOR') {
+      if (!formData.classId) {
+        toast({
+          title: 'Class selection required',
+          description: 'Please select the class you will be teaching.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // No validation needed - instructor can select any available class
+      // The class assignment will be made after instructor profile is created
     }
 
     try {
-      await signup({
+      const signupData: any = {
         firstName: formData.firstName,
         lastName: formData.lastName,
         email: formData.email,
@@ -69,16 +237,24 @@ export default function SignupPage() {
         role: formData.role,
         wardId: formData.wardId,
         phone: formData.phone,
-      });
+      };
+
+      // Add classId if instructor selected a class
+      if (formData.role === 'INSTRUCTOR' && formData.classId) {
+        signupData.classId = formData.classId;
+      }
+
+      await signup(signupData);
       toast({
         title: 'Account created!',
-        description: 'Welcome to SkillGather. Your account has been created successfully.',
+        description: 'Welcome to Lekki Stake Gathering Place. Your account has been created successfully.',
       });
       navigate('/dashboard');
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Something went wrong. Please try again.';
       toast({
         title: 'Signup failed',
-        description: 'Something went wrong. Please try again.',
+        description: errorMessage,
         variant: 'destructive',
       });
     }
@@ -93,40 +269,136 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-screen bg-gradient-hero flex">
-      {/* Left Panel - Decorative */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-primary relative overflow-hidden">
-        <div className="absolute inset-0 bg-church-navy/20" />
-        <div className="relative z-10 flex flex-col justify-center px-16 text-primary-foreground">
-          <h1 className="text-5xl font-serif font-bold mb-6 animate-slide-up">
+      {/* Left Panel - Decorative with Animated Background */}
+      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
+        {/* Animated Background Layer */}
+        <div className="absolute inset-0 overflow-hidden bg-gradient-to-br from-slate-300 via-green-200/70 to-amber-200/70">
+          {/* Large visible gradient orbs */}
+          <div 
+            className="absolute w-[600px] h-[600px] rounded-full blur-3xl"
+            style={{
+              top: '10%',
+              left: '-10%',
+              background: 'radial-gradient(circle, rgba(27, 94, 61, 0.25) 0%, rgba(27, 94, 61, 0.12) 50%, transparent 100%)',
+              animation: 'floatSlow 15s ease-in-out infinite'
+            }}
+          />
+          <div 
+            className="absolute w-[500px] h-[500px] rounded-full blur-3xl"
+            style={{
+              bottom: '10%',
+              right: '-5%',
+              background: 'radial-gradient(circle, rgba(245, 176, 65, 0.3) 0%, rgba(245, 176, 65, 0.15) 50%, transparent 100%)',
+              animation: 'floatSlow 18s ease-in-out infinite',
+              animationDelay: '3s'
+            }}
+          />
+          <div 
+            className="absolute w-[450px] h-[450px] rounded-full blur-3xl"
+            style={{
+              top: '40%',
+              left: '30%',
+              background: 'radial-gradient(circle, rgba(27, 94, 61, 0.22) 0%, rgba(27, 94, 61, 0.1) 50%, transparent 100%)',
+              animation: 'floatSlow 20s ease-in-out infinite',
+              animationDelay: '6s'
+            }}
+          />
+          
+          {/* Visible floating particles */}
+          {[...Array(40)].map((_, i) => (
+            <div
+              key={`particle-${i}`}
+              className="absolute rounded-full"
+              style={{
+                width: `${(i % 4) + 4}px`,
+                height: `${(i % 4) + 4}px`,
+                left: `${(i * 13 + 7) % 95}%`,
+                top: `${(i * 19 + 5) % 90}%`,
+                background: i % 3 === 0 
+                  ? 'rgba(27, 94, 61, 0.7)' 
+                  : i % 3 === 1 
+                  ? 'rgba(245, 176, 65, 0.7)' 
+                  : 'rgba(148, 163, 184, 0.6)',
+                boxShadow: i % 3 === 0 
+                  ? '0 0 25px rgba(27, 94, 61, 0.8)' 
+                  : i % 3 === 1 
+                  ? '0 0 25px rgba(245, 176, 65, 0.8)' 
+                  : '0 0 18px rgba(148, 163, 184, 0.7)',
+                animation: `float3d ${(i % 12) + 8}s ease-in-out infinite`,
+                animationDelay: `${(i % 5)}s`,
+              }}
+            />
+          ))}
+          
+          {/* Floating geometric shapes */}
+          {[...Array(20)].map((_, i) => (
+            <div
+              key={`shape-${i}`}
+              className="absolute"
+              style={{
+                width: `${(i % 8) * 10 + 40}px`,
+                height: `${(i % 8) * 10 + 40}px`,
+                left: `${(i * 17 + 3) % 92}%`,
+                top: `${(i * 23 + 8) % 88}%`,
+                background: i % 2 === 0 
+                  ? 'linear-gradient(135deg, rgba(27, 94, 61, 0.18), rgba(27, 94, 61, 0.1))' 
+                  : 'linear-gradient(135deg, rgba(245, 176, 65, 0.18), rgba(245, 176, 65, 0.1))',
+                borderRadius: i % 3 === 0 ? '50%' : i % 3 === 1 ? '30%' : '15px',
+                border: i % 2 === 0 
+                  ? '2px solid rgba(27, 94, 61, 0.35)' 
+                  : '2px solid rgba(245, 176, 65, 0.35)',
+                animation: `floatRotate ${(i % 20) + 15}s ease-in-out infinite`,
+                animationDelay: `${(i % 8)}s`,
+              }}
+            />
+          ))}
+          
+          {/* Education/Skill Icons - floating */}
+          {['📚', '✏️', '🎓', '📖', '🏆', '⭐', '💡', '🎯', '📝', '🔧', '🎨', '💻', '🔨', '✨', '🌟'].map((icon, i) => (
+            <div
+              key={`icon-${i}`}
+              className="absolute text-2xl opacity-40"
+              style={{
+                left: `${(i * 23 + 5) % 95}%`,
+                top: `${(i * 17 + 10) % 85}%`,
+                filter: i % 2 === 0 ? 'hue-rotate(130deg)' : 'hue-rotate(40deg)',
+                animation: `float3d ${(i % 5) * 3 + 10}s ease-in-out infinite`,
+                animationDelay: `${(i % 6)}s`,
+              }}
+            >
+              {icon}
+            </div>
+          ))}
+        </div>
+        <div className="relative z-10 flex flex-col justify-center px-16 text-gathering-dark">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold leading-tight mb-6 animate-slide-up text-gathering-dark">
             Begin Your<br />
-            <span className="text-church-gold-light">Journey Today</span>
+            <span className="text-gathering-yellow">Journey Today</span>
           </h1>
-          <p className="text-lg opacity-90 max-w-md animate-slide-up" style={{ animationDelay: '0.1s' }}>
+          <p className="text-base sm:text-lg max-w-md animate-slide-up text-gathering-dark/70" style={{ animationDelay: '0.1s' }}>
             Join our growing community of dedicated learners and skilled instructors. Develop your God-given talents.
           </p>
           <div className="mt-12 space-y-4 animate-slide-up" style={{ animationDelay: '0.2s' }}>
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-church-gold/20 flex items-center justify-center">
-                <span className="text-church-gold-light">✓</span>
+              <div className="w-8 h-8 rounded-full bg-gathering-green/20 flex items-center justify-center">
+                <span className="text-gathering-green">✓</span>
               </div>
-              <span className="opacity-90">Access to diverse skill courses</span>
+              <span className="text-gathering-dark/80">Access to diverse skill courses</span>
             </div>
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-church-gold/20 flex items-center justify-center">
-                <span className="text-church-gold-light">✓</span>
+              <div className="w-8 h-8 rounded-full bg-gathering-green/20 flex items-center justify-center">
+                <span className="text-gathering-green">✓</span>
               </div>
-              <span className="opacity-90">Learn from experienced instructors</span>
+              <span className="text-gathering-dark/80">Learn from experienced instructors</span>
             </div>
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-church-gold/20 flex items-center justify-center">
-                <span className="text-church-gold-light">✓</span>
+              <div className="w-8 h-8 rounded-full bg-gathering-green/20 flex items-center justify-center">
+                <span className="text-gathering-green">✓</span>
               </div>
-              <span className="opacity-90">Track your progress and growth</span>
+              <span className="text-gathering-dark/80">Track your progress and growth</span>
             </div>
           </div>
         </div>
-        <div className="absolute bottom-0 right-0 w-96 h-96 bg-church-gold/10 rounded-full blur-3xl" />
-        <div className="absolute top-20 right-20 w-64 h-64 bg-primary-foreground/5 rounded-full blur-2xl" />
       </div>
 
       {/* Right Panel - Signup Form */}
@@ -179,10 +451,14 @@ export default function SignupPage() {
                   placeholder="you@example.com"
                   value={formData.email}
                   onChange={(e) => handleChange('email', e.target.value)}
-                  className="pl-10 h-11"
+                  onBlur={(e) => validateField('email', e.target.value)}
+                  className={`pl-10 h-11 ${validationErrors.email ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                   required
                 />
               </div>
+              {validationErrors.email && (
+                <p className="text-xs text-red-500 mt-1">{validationErrors.email}</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -209,16 +485,20 @@ export default function SignupPage() {
                     <SelectValue placeholder="Choose role" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="student">Student</SelectItem>
-                    <SelectItem value="instructor">Instructor</SelectItem>
+                    <SelectItem value="STUDENT">Student</SelectItem>
+                    <SelectItem value="INSTRUCTOR">Instructor</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="ward">Ward</Label>
-                <Select value={formData.wardId} onValueChange={(value) => handleChange('wardId', value)}>
+                <Select 
+                  value={formData.wardId} 
+                  onValueChange={(value) => handleChange('wardId', value)}
+                  disabled={loadingWards}
+                >
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select ward" />
+                    <SelectValue placeholder={loadingWards ? "Loading wards..." : "Select ward"} />
                   </SelectTrigger>
                   <SelectContent>
                     {wards.map((ward) => (
@@ -228,6 +508,38 @@ export default function SignupPage() {
                 </Select>
               </div>
             </div>
+
+            {/* Class Selection - Only show for Instructors */}
+            {formData.role === 'INSTRUCTOR' && (
+              <div className="space-y-2">
+                <Label htmlFor="class">Select Your Class</Label>
+                <Select 
+                  value={formData.classId} 
+                  onValueChange={(value) => handleChange('classId', value)}
+                  disabled={loadingClasses}
+                >
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder={loadingClasses ? "Loading classes..." : "Select the class you teach"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {classes.length > 0 ? (
+                      classes.map((classItem) => (
+                        <SelectItem key={classItem.id} value={classItem.id}>
+                          {classItem.name} {classItem.instructorName ? `(${classItem.instructorName})` : ''}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="p-2 text-sm text-muted-foreground text-center">
+                        No classes available
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Select the class you've been assigned to teach
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
@@ -239,17 +551,24 @@ export default function SignupPage() {
                   placeholder="Create a strong password"
                   value={formData.password}
                   onChange={(e) => handleChange('password', e.target.value)}
-                  className="pl-10 pr-10 h-11"
+                  onBlur={(e) => validateField('password', e.target.value)}
+                  className={`pl-10 pr-10 h-11 ${validationErrors.password ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {validationErrors.password && (
+                <p className="text-xs text-red-500 mt-1">{validationErrors.password}</p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Must be 8+ characters with uppercase, lowercase, and number
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -262,17 +581,21 @@ export default function SignupPage() {
                   placeholder="Confirm your password"
                   value={formData.confirmPassword}
                   onChange={(e) => handleChange('confirmPassword', e.target.value)}
-                  className="pl-10 pr-10 h-11"
+                  onBlur={(e) => validateField('confirmPassword', e.target.value)}
+                  className={`pl-10 pr-10 h-11 ${validationErrors.confirmPassword ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {validationErrors.confirmPassword && (
+                <p className="text-xs text-red-500 mt-1">{validationErrors.confirmPassword}</p>
+              )}
             </div>
 
             <Button type="submit" variant="church" size="lg" className="w-full" disabled={loading}>

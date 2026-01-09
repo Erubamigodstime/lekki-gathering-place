@@ -1,203 +1,193 @@
-import { Link } from 'react-router-dom';
-import { ArrowRight, BookOpen, Users, GraduationCap, CheckCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { ChurchLogo } from '@/components/ChurchLogo';
-import { useState, useEffect } from 'react';
+import HeroSection from '@/components/HeroSection';
+import Header from '@/components/Header';
+import { ClassesShowcase } from '@/components/classes-showcase';
+import { InstructorSpotlight } from '@/components/InstructorsSpotlight-new';
+import Footer from '@/components/Footer';
+import PlatformFeatures from '@/components/PlatformFeatures';
+import { AttendanceSystem } from '@/components/AttendanceSystem';
+import { AwardsAndCertificates } from '@/components/AwardsAndCertificates';
+import { ProblemSolution } from '@/components/ProblemSolution';
+import { WhyThisMatters } from '@/components/WhyThisMatters';
+import { AnalyticsInsights } from '@/components/AnalyticsInsights';
+import { ManagementToolIntro } from '@/components/ManagementToolIntro';
+import ScrollToTop from '@/components/ScrollToTop';
+import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 
-const heroImages = [
-  '/images/hero-1.jpg',
-  '/images/hero-2.jpg',
-  '/images/hero-3.jpg',
-  '/images/hero-4.jpg',
-  '/images/hero-5.jpg',
-];
 
-const features = [
-  {
-    icon: BookOpen,
-    title: 'Skill-Based Learning',
-    description: 'Access a variety of skill training classes tailored for church members.',
-  },
-  {
-    icon: Users,
-    title: 'Community Driven',
-    description: 'Learn alongside fellow church members in a supportive environment.',
-  },
-  {
-    icon: GraduationCap,
-    title: 'Expert Instructors',
-    description: 'Train under experienced instructors dedicated to your growth.',
-  },
-];
 
-const stats = [
-  { value: '500+', label: 'Active Students' },
-  { value: '50+', label: 'Skilled Instructors' },
-  { value: '30+', label: 'Training Courses' },
-  { value: '15', label: 'Wards Served' },
-];
+
 
 export default function Index() {
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const location = useLocation();
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentImageIndex((prevIndex) => (prevIndex + 1) % heroImages.length);
-    }, 2000); 
-
-    return () => clearInterval(interval);
-  }, []);
+    // Handle hash-based navigation
+    if (location.hash) {
+      const sectionId = location.hash.substring(1); // Remove the #
+      setTimeout(() => {
+        const element = document.getElementById(sectionId);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    }
+  }, [location.hash]);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <ChurchLogo size="sm" />
-          <div className="flex items-center gap-4">
-            <Link to="/login">
-              <Button variant="ghost">Sign In</Button>
-            </Link>
-            <Link to="/signup">
-              <Button variant="church">Get Started</Button>
-            </Link>
+    <div className="min-h-screen relative bg-white">
+      {/* Skip to main content link for screen readers */}
+      <a 
+        href="#main-content" 
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-primary focus:text-white focus:rounded"
+      >
+        Skip to main content
+      </a>
+      
+      {/* 3D Animated Background Layer */}
+      <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none bg-gradient-to-br from-slate-300 via-green-200/70 to-amber-200/70">
+        
+        {/* Large visible gradient orbs - darker */}
+        <div 
+          className="absolute w-[600px] h-[600px] rounded-full blur-3xl"
+          style={{
+            top: '10%',
+            left: '-10%',
+            background: 'radial-gradient(circle, rgba(27, 94, 61, 0.25) 0%, rgba(27, 94, 61, 0.12) 50%, transparent 100%)',
+            animation: 'floatSlow 15s ease-in-out infinite'
+          }}
+        />
+        <div 
+          className="absolute w-[500px] h-[500px] rounded-full blur-3xl"
+          style={{
+            bottom: '10%',
+            right: '-5%',
+            background: 'radial-gradient(circle, rgba(245, 176, 65, 0.3) 0%, rgba(245, 176, 65, 0.15) 50%, transparent 100%)',
+            animation: 'floatSlow 18s ease-in-out infinite',
+            animationDelay: '3s'
+          }}
+        />
+        <div 
+          className="absolute w-[450px] h-[450px] rounded-full blur-3xl"
+          style={{
+            top: '40%',
+            left: '30%',
+            background: 'radial-gradient(circle, rgba(27, 94, 61, 0.22) 0%, rgba(27, 94, 61, 0.1) 50%, transparent 100%)',
+            animation: 'floatSlow 20s ease-in-out infinite',
+            animationDelay: '6s'
+          }}
+        />
+        
+        {/* Visible floating particles - more */}
+        {[...Array(40)].map((_, i) => (
+          <div
+            key={`particle-${i}`}
+            className="absolute rounded-full"
+            style={{
+              width: `${Math.random() * 8 + 4}px`,
+              height: `${Math.random() * 8 + 4}px`,
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              background: i % 3 === 0 
+                ? 'rgba(27, 94, 61, 0.7)' 
+                : i % 3 === 1 
+                ? 'rgba(245, 176, 65, 0.7)' 
+                : 'rgba(148, 163, 184, 0.6)',
+              boxShadow: i % 3 === 0 
+                ? '0 0 25px rgba(27, 94, 61, 0.8)' 
+                : i % 3 === 1 
+                ? '0 0 25px rgba(245, 176, 65, 0.8)' 
+                : '0 0 18px rgba(148, 163, 184, 0.7)',
+              animation: `float3d ${Math.random() * 12 + 8}s ease-in-out infinite`,
+              animationDelay: `${Math.random() * 5}s`,
+            }}
+          />
+        ))}
+        
+        {/* Floating geometric shapes - more */}
+        {[...Array(20)].map((_, i) => (
+          <div
+            key={`shape-${i}`}
+            className="absolute"
+            style={{
+              width: `${Math.random() * 80 + 40}px`,
+              height: `${Math.random() * 80 + 40}px`,
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              background: i % 2 === 0 
+                ? 'linear-gradient(135deg, rgba(27, 94, 61, 0.18), rgba(27, 94, 61, 0.1))' 
+                : 'linear-gradient(135deg, rgba(245, 176, 65, 0.18), rgba(245, 176, 65, 0.1))',
+              borderRadius: i % 3 === 0 ? '50%' : i % 3 === 1 ? '30%' : '15px',
+              border: i % 2 === 0 
+                ? '2px solid rgba(27, 94, 61, 0.35)' 
+                : '2px solid rgba(245, 176, 65, 0.35)',
+              animation: `floatRotate ${Math.random() * 20 + 15}s ease-in-out infinite`,
+              animationDelay: `${Math.random() * 8}s`,
+            }}
+          />
+        ))}
+        
+        {/* Education/Skill Icons - floating */}
+        {['📚', '✏️', '🎓', '📖', '🏆', '⭐', '💡', '🎯', '📝', '🔧', '🎨', '💻', '🔨', '✨', '🌟'].map((icon, i) => (
+          <div
+            key={`icon-${i}`}
+            className="absolute text-2xl opacity-40"
+            style={{
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              filter: i % 2 === 0 ? 'hue-rotate(130deg)' : 'hue-rotate(40deg)',
+              animation: `float3d ${Math.random() * 15 + 10}s ease-in-out infinite`,
+              animationDelay: `${Math.random() * 6}s`,
+            }}
+          >
+            {icon}
           </div>
-        </div>
-      </nav>
-
-      {/* Hero Section */}
-      <section className="relative pt-32 pb-20 overflow-hidden">
-        {/* Animated Background Images */}
-        <div className="absolute inset-0 z-0">
-          {heroImages.map((image, index) => (
-            <div
-              key={index}
-              className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-              style={{
-                opacity: currentImageIndex === index ? 1 : 0,
-                backgroundImage: `url(${image})`,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-              }}
-            />
-          ))}
-          {/* Dark overlay for better text readability */}
-          <div className="absolute inset-0 bg-black/50" />
-        </div>
-
-        <div className="container mx-auto px-6 relative z-10">
-          <div className="max-w-4xl mx-auto text-center animate-fade-in">
-            <h1 className="text-5xl md:text-6xl font-serif font-bold text-white mb-6 leading-tight">
-              Develop Your Skills,{' '}
-              <span className="text-church-gold">Serve With Purpose</span>
-            </h1>
-            <p className="text-xl text-white/90 mb-10 max-w-2xl mx-auto">
-              Join our church's skill acquisition center and discover your God-given talents. Learn practical skills that empower you to serve and contribute to your community.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/signup">
-                <Button variant="gold" size="xl" className="w-full sm:w-auto">
-                  Start Learning Today
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </Link>
-              <Link to="/login">
-                <Button variant="outline" size="xl" className="w-full sm:w-auto">
-                  Sign In to Dashboard
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
+        ))}
+      </div>
+      
+      {/* Content Layer */}
+      <div className="relative z-10">
+      <Header />
+      <main id="main-content" tabIndex={-1}>
+      <section id="hero">
+        <HeroSection />
       </section>
-
-      {/* Stats Section */}
-      <section className="py-16 bg-gradient-primary text-primary-foreground">
-        <div className="container mx-auto px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {stats.map((stat, index) => (
-              <div 
-                key={index} 
-                className="text-center animate-slide-up"
-                style={{ animationDelay: `${index * 0.1}s` }}
-              >
-                <div className="text-4xl md:text-5xl font-bold text-church-gold-light mb-2">
-                  {stat.value}
-                </div>
-                <div className="text-sm md:text-base opacity-90">{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+      <section id="classes">
+        <ClassesShowcase />
       </section>
-
-      {/* Features Section */}
-      <section className="py-20">
-        <div className="container mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-serif font-bold text-foreground mb-4">
-              Why Choose SkillGather?
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Our platform is designed specifically for church communities to nurture and develop talents.
-            </p>
-          </div>
-          
-          <div className="grid md:grid-cols-3 gap-8">
-            {features.map((feature, index) => (
-              <div 
-                key={index}
-                className="p-8 rounded-2xl bg-card border border-border shadow-card hover:shadow-card-hover transition-all duration-300 animate-slide-up"
-                style={{ animationDelay: `${index * 0.1}s` }}
-              >
-                <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center mb-6">
-                  <feature.icon className="h-7 w-7 text-primary" />
-                </div>
-                <h3 className="text-xl font-semibold text-foreground mb-3">{feature.title}</h3>
-                <p className="text-muted-foreground">{feature.description}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+      <section id="instructors">
+        <InstructorSpotlight/>
       </section>
-
-      {/* CTA Section */}
-      <section className="py-20 bg-muted">
-        <div className="container mx-auto px-6">
-          <div className="max-w-3xl mx-auto text-center">
-            <h2 className="text-4xl font-serif font-bold text-foreground mb-6">
-              Ready to Begin Your Journey?
-            </h2>
-            <p className="text-xl text-muted-foreground mb-8">
-              Sign up today and discover a wide range of skill training classes available at your church.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/signup">
-                <Button variant="church" size="lg">
-                  Create Free Account
-                </Button>
-              </Link>
-              <Link to="/login">
-                <Button variant="outline" size="lg">
-                  Already a Member? Sign In
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
+      <section id="intro">
+        <ManagementToolIntro/>
       </section>
+      <section id="features">
+        <PlatformFeatures/>
+      </section>
+      <section id="attendance">
+        <AttendanceSystem/>
+      </section>
+      <section id="analytics">
+        <AnalyticsInsights/>
+      </section>
+      <section id="problem-solution">
+        <ProblemSolution/>
+      </section>
+      <section id="awards">
+        <AwardsAndCertificates/>
+      </section>
+      <section id="why-matters">
+        <WhyThisMatters/>
+      </section> 
+      </main>
 
       {/* Footer */}
-      <footer className="py-12 bg-card border-t border-border">
-        <div className="container mx-auto px-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <ChurchLogo size="sm" />
-            <p className="text-sm text-muted-foreground">
-              © {new Date().getFullYear()} SkillGather Church Training Center. All rights reserved.
-            </p>
-          </div>
-        </div>
-      </footer>
+      <Footer/>
+      
+      {/* Scroll to Top Button */}
+      <ScrollToTop />
+      </div>
+
     </div>
   );
 }
