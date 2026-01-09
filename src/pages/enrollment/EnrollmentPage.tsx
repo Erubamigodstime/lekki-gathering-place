@@ -107,7 +107,7 @@ export default function EnrollmentPage() {
 
     try {
       const token = localStorage.getItem('token');
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+      const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
       
       console.log('Enrolling in class:', classId);
       console.log('Token:', token ? 'Present' : 'Missing');

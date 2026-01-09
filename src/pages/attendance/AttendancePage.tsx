@@ -119,7 +119,7 @@ export default function AttendancePage() {
   const fetchWards = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/v1/wards', {
+      const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1'}/wards`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setWards(Array.isArray(response.data.data) ? response.data.data : []);
@@ -132,7 +132,7 @@ export default function AttendancePage() {
   const fetchClasses = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/v1/classes', {
+      const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1'}/classes`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const classData = response.data.data;
@@ -188,7 +188,7 @@ export default function AttendancePage() {
       if (wardFilter !== 'all') params.wardId = wardFilter;
 
       console.log('Attendance API params:', params);
-      const response = await axios.get('http://localhost:5000/api/v1/attendance', {
+      const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1'}/attendance`, {
         headers: { Authorization: `Bearer ${token}` },
         params
       });
@@ -228,7 +228,7 @@ export default function AttendancePage() {
       if (wardFilter !== 'all') params.wardId = wardFilter;
 
       console.log('Report API params:', params);
-      const response = await axios.get('http://localhost:5000/api/v1/attendance/report', {
+      const response = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1'}/attendance/report`, {
         headers: { Authorization: `Bearer ${token}` },
         params
       });

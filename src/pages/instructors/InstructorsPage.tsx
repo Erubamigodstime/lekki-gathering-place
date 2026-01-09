@@ -81,7 +81,7 @@ export default function InstructorsPage() {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/v1/instructors', {
+      const response = await axios.get('https://lekki-gathering-place-backend-1.onrender.com/api/v1/instructors', {
         headers: { Authorization: `Bearer ${token}` }
       });
       console.log('Fetched instructors:', response.data.data);
@@ -96,7 +96,7 @@ export default function InstructorsPage() {
   const fetchWards = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/v1/wards', {
+      const response = await axios.get('https://lekki-gathering-place-backend-1.onrender.com/api/v1/wards', {
         headers: { Authorization: `Bearer ${token}` }
       });
       console.log('Fetched wards:', response.data.data);
@@ -110,7 +110,7 @@ export default function InstructorsPage() {
     try {
       setActionLoading(instructorId);
       const token = localStorage.getItem('token');
-      await axios.patch(`http://localhost:5000/api/v1/instructors/${instructorId}/approve`, 
+      await axios.patch(`https://lekki-gathering-place-backend-1.onrender.com/api/v1/instructors/${instructorId}/approve`, 
         { approved },
         { headers: { Authorization: `Bearer ${token}` } }
       );

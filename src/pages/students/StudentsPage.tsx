@@ -87,7 +87,7 @@ export default function StudentsPage() {
       setLoading(true);
       const token = localStorage.getItem('token');
       console.log('Fetching students with token:', token ? 'Token exists' : 'No token');
-      const response = await axios.get('http://localhost:5000/api/v1/students', {
+      const response = await axios.get('https://lekki-gathering-place-backend-1.onrender.com/api/v1/students', {
         headers: { Authorization: `Bearer ${token}` }
       });
       const studentData = response.data.data;
@@ -110,7 +110,7 @@ export default function StudentsPage() {
   const fetchWards = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/v1/wards', {
+      const response = await axios.get('https://lekki-gathering-place-backend-1.onrender.com/api/v1/wards', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setWards(Array.isArray(response.data.data) ? response.data.data : []);
@@ -123,7 +123,7 @@ export default function StudentsPage() {
   const fetchClasses = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5000/api/v1/classes', {
+      const response = await axios.get('https://lekki-gathering-place-backend-1.onrender.com/api/v1/classes', {
         headers: { Authorization: `Bearer ${token}` }
       });
       const classData = response.data.data;

@@ -113,7 +113,7 @@ export default function SignupPage() {
   useEffect(() => {
     const fetchWards = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/v1/wards');
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1'}/wards`);
         const data = await response.json();
         if (data.success) {
           setWards(data.data);
@@ -137,7 +137,7 @@ export default function SignupPage() {
     const fetchClasses = async () => {
       try {
         console.log('Fetching classes from API...');
-        const response = await fetch('http://localhost:5000/api/v1/classes');
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1'}/classes`);
         console.log('Classes API response status:', response.status);
         const result = await response.json();
         console.log('Classes API result:', result);

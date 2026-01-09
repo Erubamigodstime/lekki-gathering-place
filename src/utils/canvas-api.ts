@@ -21,7 +21,7 @@ import type {
   CertificateStats,
 } from '../types/canvas';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
 
 // Create axios instance with auth token
 const api = axios.create({

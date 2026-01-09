@@ -24,7 +24,7 @@ interface SignupData {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Backend API URL
-const API_BASE_URL = 'http://localhost:5000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
 // Helper function for API calls
 async function apiCall(endpoint: string, options: RequestInit = {}) {
