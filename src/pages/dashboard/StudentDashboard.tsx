@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
@@ -45,6 +45,7 @@ interface AttendanceRecord {
 export default function StudentDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [schedule, setSchedule] = useState<ClassSchedule[]>([]);
   const [recommendedClasses, setRecommendedClasses] = useState<RecommendedClass[]>([]);
@@ -56,14 +57,19 @@ export default function StudentDashboard() {
   useEffect(() => {
     const fetchEnrollments = async () => {
       try {
+        // Abort previous request if any
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+        const { signal } = abortControllerRef.current;
+
         const token = localStorage.getItem('token');
-        console.log('Fetching enrollments, refresh key:', refreshKey);
         const response = await axios.get(`${API_URL}/enrollments/my-classes`, {
           headers: { Authorization: `Bearer ${token}` },
+          signal
         });
         const enrollmentData = response.data.data || [];
-        console.log('Enrollments fetched:', enrollmentData.length, 'enrollments');
-        console.log('Enrollment statuses:', enrollmentData.map((e: any) => ({ id: e.id, status: e.status })));
         setEnrollments(enrollmentData);
         
         // Build schedule from enrollments
@@ -78,6 +84,13 @@ export default function StudentDashboard() {
     };
 
     fetchEnrollments();
+
+    return () => {
+      // Cleanup: abort any pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, [refreshKey]);
 
   // Refetch enrollments when page becomes visible
@@ -92,9 +105,28 @@ export default function StudentDashboard() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
+  // Parallelize attendance history and recommended classes
   useEffect(() => {
-    fetchAttendanceHistory();
-    fetchRecommendedClasses();
+    const fetchData = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      try {
+        const signal = abortControllerRef.current?.signal;
+        
+        // Fetch attendance history and recommended classes in parallel
+        await Promise.all([
+          fetchAttendanceHistory(token, signal),
+          fetchRecommendedClasses(token, signal)
+        ]);
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.name !== 'CanceledError') {
+          console.error('Failed to fetch dashboard data:', error);
+        }
+      }
+    };
+
+    fetchData();
   }, []);
 
   const buildScheduleFromEnrollments = (enrollmentData: any[]) => {
@@ -134,11 +166,11 @@ export default function StudentDashboard() {
     setSchedule(scheduleData);
   };
 
-  const fetchAttendanceHistory = async () => {
+  const fetchAttendanceHistory = async (token: string, signal?: AbortSignal) => {
     try {
-      const token = localStorage.getItem('token');
       const response = await axios.get(`${API_URL}/attendance/my-attendance`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal
       });
       
       const records = response.data.data || [];
@@ -175,15 +207,16 @@ export default function StudentDashboard() {
     }
   };
 
-  const fetchRecommendedClasses = async () => {
+  const fetchRecommendedClasses = async (token: string, signal?: AbortSignal) => {
     try {
-      const token = localStorage.getItem('token');
-      // Get all classes from same ward that user is not enrolled in
-      const response = await axios.get(`${API_URL}/classes`, {
+      // Get only first 10 classes for recommendations to avoid loading all classes
+      const response = await axios.get(`${API_URL}/classes?page=1&limit=10`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal
       });
       
-      const allClasses = response.data.data || [];
+      // Handle paginated response
+      const allClasses = response.data.data.data || response.data.data || [];
       const enrolledClassIds = enrollments.map((e: any) => e.classId);
       
       // Filter out enrolled classes and get classes from same ward
@@ -229,7 +262,9 @@ export default function StudentDashboard() {
       );
       
       // Refresh attendance history
-      fetchAttendanceHistory();
+      if (token) {
+        await fetchAttendanceHistory(token, abortControllerRef.current?.signal);
+      }
     } catch (error: any) {
       console.error('Failed to mark attendance:', error);
       

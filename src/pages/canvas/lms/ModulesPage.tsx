@@ -340,7 +340,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
   // If viewing a specific lesson
   if (selectedLesson) {
     return (
-      <div className="p-8 max-w-4xl mx-auto">
+      <div className="p-4 sm:p-6 md:p-8 max-w-4xl mx-auto">
         <Button
           variant="ghost"
           onClick={() => setSelectedLesson(null)}
@@ -351,17 +351,17 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
 
         <Card className="shadow-lg border-t-4 border-t-blue-500">
           <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <Badge variant="outline" className="mb-2 border-blue-500 text-blue-700">
                   Week {selectedLesson.week}
                 </Badge>
-                <CardTitle className="text-2xl text-gray-900">{selectedLesson.title}</CardTitle>
+                <CardTitle className="text-xl sm:text-2xl text-gray-900">{selectedLesson.title}</CardTitle>
               </div>
               {getStatusBadge(selectedLesson.completionStatus)}
             </div>
           </CardHeader>
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             {selectedLesson.content ? (
               <div
                 className="prose prose-blue max-w-none"
@@ -386,15 +386,15 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
                   {selectedLesson.courseMaterials.map((material) => (
                     <div
                       key={material.id}
-                      className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
                     >
                       <div className="flex items-center gap-3">
-                        {material.type === 'PDF' && <File className="h-5 w-5 text-red-600" />}
-                        {material.type === 'DOCUMENT' && <FileText className="h-5 w-5 text-blue-600" />}
-                        {material.type === 'VIDEO' && <FileVideo className="h-5 w-5 text-purple-600" />}
-                        {material.type === 'LINK' && <LinkIcon className="h-5 w-5 text-green-600" />}
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{material.title}</p>
+                        {material.type === 'PDF' && <File className="h-5 w-5 text-red-600 flex-shrink-0" />}
+                        {material.type === 'DOCUMENT' && <FileText className="h-5 w-5 text-blue-600 flex-shrink-0" />}
+                        {material.type === 'VIDEO' && <FileVideo className="h-5 w-5 text-purple-600 flex-shrink-0" />}
+                        {material.type === 'LINK' && <LinkIcon className="h-5 w-5 text-green-600 flex-shrink-0" />}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 truncate">{material.title}</p>
                           <p className="text-xs text-gray-500">
                             {material.type}
                             {material.fileSize && ` • ${formatFileSize(material.fileSize)}`}
@@ -405,7 +405,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
                         href={material.fileUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+                        className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors whitespace-nowrap"
                       >
                         <Download className="h-4 w-4" />
                         {material.type === 'PDF' ? 'View PDF' : 'Download'}
@@ -470,24 +470,24 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
 
   // Main modules view
   return (
-    <div className="p-8 bg-gradient-to-br from-gray-50 to-blue-50 min-h-screen">
+    <div className="p-4 sm:p-6 md:p-8 bg-gradient-to-br from-gray-50 to-blue-50 min-h-screen">
       <div className="max-w-4xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
             Course Modules
           </h1>
-          <p className="text-gray-600 text-lg">
+          <p className="text-gray-600 text-sm sm:text-base md:text-lg">
             Complete each week's lessons and assignments to progress through the course
           </p>
           
           {/* Class Schedule Info */}
           {classSchedule && (classSchedule.days || classSchedule.time) && (
-            <div className="mt-4 p-4 bg-white border border-blue-200 rounded-lg shadow-sm">
+            <div className="mt-4 p-3 sm:p-4 bg-white border border-blue-200 rounded-lg shadow-sm">
               <div className="flex items-center gap-2 mb-2">
-                <Calendar className="h-5 w-5 text-blue-600" />
-                <h3 className="font-semibold text-gray-900">Class Schedule</h3>
+                <Calendar className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
+                <h3 className="font-semibold text-sm sm:text-base text-gray-900">Class Schedule</h3>
               </div>
-              <div className="flex gap-4 text-sm text-gray-700">
+              <div className="flex flex-col sm:flex-row sm:gap-4 gap-2 text-xs sm:text-sm text-gray-700">
                 {classSchedule.days && classSchedule.days.length > 0 && (
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="bg-blue-50 border-blue-300">
@@ -505,7 +505,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
             </div>
           )}
           
-          <div className="mt-4 flex gap-4 text-sm">
+          <div className="mt-4 flex flex-wrap gap-3 sm:gap-4 text-xs sm:text-sm">
             <div className="flex items-center gap-2">
               <Circle className="h-4 w-4 text-gray-400" />
               <span className="text-gray-600">Not Started</span>
@@ -538,32 +538,36 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
             return (
               <Card key={module.week} className={`overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 border-l-4 ${borderColor} ${bgColor}`}>
                 <div
-                  className="flex items-center justify-between p-5 cursor-pointer hover:bg-opacity-80 transition-all"
+                  className="flex items-center justify-between p-3 sm:p-4 md:p-5 cursor-pointer hover:bg-opacity-80 transition-all"
                   onClick={() => toggleWeek(module.week)}
                 >
-                  <div className="flex items-center gap-4 flex-1">
-                    <div onClick={(e) => { e.stopPropagation(); markWeekComplete(module.week); }} className="cursor-pointer hover:scale-110 transition-transform">
+                  <div className="flex items-center gap-2 sm:gap-3 md:gap-4 flex-1 min-w-0">
+                    <div onClick={(e) => { e.stopPropagation(); markWeekComplete(module.week); }} className="cursor-pointer hover:scale-110 transition-transform flex-shrink-0">
                       {getStatusIcon(module.completionStatus)}
                     </div>
-                    <div>
-                      <h3 className="font-bold text-xl text-gray-800">Week {module.week}</h3>
-                      <p className="text-sm text-gray-600 mt-1">{module.title}</p>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-bold text-lg sm:text-xl text-gray-800">Week {module.week}</h3>
+                      <p className="text-xs sm:text-sm text-gray-600 mt-1 truncate">{module.title}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {getStatusBadge(module.completionStatus)}
-                    {module.lessons.length > 0 && (
-                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-300">
-                        <FileText className="h-3 w-3 mr-1" />
-                        {module.lessons.length} {module.lessons.length === 1 ? 'Lesson' : 'Lessons'}
-                      </Badge>
-                    )}
-                    {module.assignments.length > 0 && (
-                      <Badge variant="secondary" className="bg-orange-100 text-orange-700 border-orange-300">
-                        <ClipboardList className="h-3 w-3 mr-1" />
-                        {module.assignments.length} {module.assignments.length === 1 ? 'Assignment' : 'Assignments'}
-                      </Badge>
-                    )}
+                  <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                    <div className="hidden sm:flex items-center gap-2">
+                      {getStatusBadge(module.completionStatus)}
+                    </div>
+                    <div className="hidden md:flex items-center gap-2">
+                      {module.lessons.length > 0 && (
+                        <Badge variant="secondary" className="bg-blue-100 text-blue-700 border-blue-300 text-xs">
+                          <FileText className="h-3 w-3 mr-1" />
+                          {module.lessons.length}
+                        </Badge>
+                      )}
+                      {module.assignments.length > 0 && (
+                        <Badge variant="secondary" className="bg-orange-100 text-orange-700 border-orange-300 text-xs">
+                          <ClipboardList className="h-3 w-3 mr-1" />
+                          {module.assignments.length}
+                        </Badge>
+                      )}
+                    </div>
                     {expandedWeeks.has(module.week) ? (
                       <ChevronDown className="h-5 w-5 text-gray-500" />
                     ) : (
@@ -573,7 +577,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
                 </div>
 
                 {expandedWeeks.has(module.week) && (
-                  <div className="border-t bg-white bg-opacity-60 p-5">
+                  <div className="border-t bg-white bg-opacity-60 p-3 sm:p-4 md:p-5">
                     {module.lessons.length === 0 && module.assignments.length === 0 ? (
                       <div className="text-center py-8 bg-gradient-to-r from-gray-50 to-slate-50 rounded-lg border-2 border-dashed border-gray-300">
                         <FileText className="h-14 w-14 mx-auto mb-3 text-gray-400" />
@@ -620,16 +624,18 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
                         {module.lessons.map((lesson) => (
                           <div
                             key={lesson.id}
-                            className="flex items-center justify-between p-4 bg-white rounded-lg border-2 border-blue-100 hover:border-blue-400 hover:shadow-md cursor-pointer transition-all duration-200 transform hover:-translate-y-1"
+                            className="flex items-center justify-between p-3 sm:p-4 bg-white rounded-lg border-2 border-blue-100 hover:border-blue-400 hover:shadow-md cursor-pointer transition-all duration-200 transform hover:-translate-y-1"
                             onClick={() => viewLessonDetail(lesson)}
                           >
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-blue-100 rounded-lg">
-                                <FileText className="h-5 w-5 text-blue-600" />
+                            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                              <div className="p-2 bg-blue-100 rounded-lg flex-shrink-0">
+                                <FileText className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
                               </div>
-                              <span className="font-semibold text-gray-800">{lesson.title}</span>
+                              <span className="font-semibold text-sm sm:text-base text-gray-800 truncate">{lesson.title}</span>
                             </div>
-                            {getStatusIcon(lesson.completionStatus)}
+                            <div className="flex-shrink-0">
+                              {getStatusIcon(lesson.completionStatus)}
+                            </div>
                           </div>
                         ))}
 
@@ -637,16 +643,16 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
                         {module.assignments.map((assignment) => (
                           <div
                             key={assignment.id}
-                            className="flex items-center justify-between p-4 bg-white rounded-lg border-2 border-orange-100 hover:border-orange-400 hover:shadow-md cursor-pointer transition-all duration-200 transform hover:-translate-y-1"
+                            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 sm:p-4 bg-white rounded-lg border-2 border-orange-100 hover:border-orange-400 hover:shadow-md cursor-pointer transition-all duration-200 transform hover:-translate-y-1"
                           >
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-orange-100 rounded-lg">
-                                <ClipboardList className="h-5 w-5 text-orange-600" />
+                            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                              <div className="p-2 bg-orange-100 rounded-lg flex-shrink-0">
+                                <ClipboardList className="h-4 w-4 sm:h-5 sm:w-5 text-orange-600" />
                               </div>
-                              <div>
-                                <span className="font-semibold text-gray-800">{assignment.title}</span>
+                              <div className="min-w-0 flex-1">
+                                <span className="font-semibold text-sm sm:text-base text-gray-800 block truncate">{assignment.title}</span>
                                 {assignment.points && (
-                                  <span className="text-sm text-gray-500 ml-2">
+                                  <span className="text-xs sm:text-sm text-gray-500">
                                     ({assignment.points} points)
                                   </span>
                                 )}

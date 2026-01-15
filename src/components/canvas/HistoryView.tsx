@@ -59,7 +59,9 @@ export function HistoryView({ userId, userRole = 'STUDENT' }: HistoryViewProps) 
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      const enrollments = response.data.data || [];
+      // Handle paginated response structure
+      const enrollData = response.data.data;
+      const enrollments = Array.isArray(enrollData) ? enrollData : (enrollData?.data || []);
 
       // Transform to course history format
       const history: CourseHistory[] = await Promise.all(

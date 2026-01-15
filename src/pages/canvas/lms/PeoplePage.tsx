@@ -81,8 +81,9 @@ export default function PeoplePage({ classId, onMessageUser }: PeoplePageProps) 
         });
       }
 
-      // Add all approved students
-      const enrollments = enrollmentsResponse.data.data || [];
+      // Add all approved students - handle paginated response
+      const enrollData = enrollmentsResponse.data.data;
+      const enrollments = Array.isArray(enrollData) ? enrollData : (enrollData?.data || []);
       enrollments.forEach((enrollment: any) => {
         if (enrollment.status === 'APPROVED' && enrollment.student?.user) {
           membersList.push({

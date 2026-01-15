@@ -85,7 +85,9 @@ export default function InstructorPeoplePage({ classId }: InstructorPeoplePagePr
           const enrollResponse = await axios.get(`${API_URL}/enrollments/class/${cls.id}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          const enrollments = enrollResponse.data.data || [];
+          // Handle paginated response structure
+          const enrollData = enrollResponse.data.data;
+          const enrollments = Array.isArray(enrollData) ? enrollData : (enrollData?.data || []);
           allEnrollments.push(...enrollments);
         } catch (err) {
           console.error(`Failed to fetch enrollments for class ${cls.id}:`, err);

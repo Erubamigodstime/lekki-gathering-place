@@ -9,7 +9,9 @@ import {
   BarChart3,
   Settings,
   ChevronLeft,
-  GraduationCap
+  GraduationCap,
+  Menu,
+  X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import axios from 'axios';
@@ -48,6 +50,7 @@ export default function InstructorCanvasLMS() {
   const [loading, setLoading] = useState(true);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     fetchClassData();
@@ -132,9 +135,47 @@ export default function InstructorCanvasLMS() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50 overflow-hidden">
+      {/* Mobile Header */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 bg-slate-900 border-b border-slate-700 p-4 z-50 flex items-center justify-between">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+          className="text-white hover:bg-slate-700"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+        <h2 className="font-semibold text-white truncate flex-1 mx-4">
+          {classData?.name}
+        </h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate('/dashboard')}
+          className="text-slate-300 hover:text-white hover:bg-slate-700"
+        >
+          <X className="h-5 w-5" />
+        </Button>
+      </div>
+
+      {/* Overlay for mobile */}
+      {isMobileSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+
       {/* Instructor Sidebar */}
-      <aside className="w-72 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 border-r border-slate-700 flex flex-col shadow-2xl">
+      <aside className={`
+        fixed lg:static inset-y-0 left-0 z-50
+        w-72 lg:w-72
+        bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 
+        border-r border-slate-700 flex flex-col shadow-2xl
+        transform transition-transform duration-300 ease-in-out
+        ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
         {/* Header */}
         <div className="p-4 border-b border-slate-700/50">
           <div className="flex items-center justify-between mb-3">
@@ -145,7 +186,15 @@ export default function InstructorCanvasLMS() {
               className="text-slate-300 hover:text-white hover:bg-slate-700/50"
             >
               <ChevronLeft className="h-4 w-4 mr-1" />
-              Back
+              <span className="hidden sm:inline">Back</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsMobileSidebarOpen(false)}
+              className="lg:hidden text-slate-300 hover:text-white hover:bg-slate-700/50"
+            >
+              <X className="h-5 w-5" />
             </Button>
             <div className="flex items-center gap-1">
               <div className={`h-2 w-2 rounded-full ${classData?.status === 'ACTIVE' ? 'bg-green-500' : 'bg-gray-500'} animate-pulse`}></div>
@@ -158,7 +207,8 @@ export default function InstructorCanvasLMS() {
           </h2>
           
           <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-300">Instructor Dashboard</span>
+            <span className="text-slate-300 hidden sm:inline">Instructor Dashboard</span>
+            <span className="text-slate-300 sm:hidden text-xs">Instructor</span>
           </div>
           
           {classData?.category && (
@@ -187,7 +237,10 @@ export default function InstructorCanvasLMS() {
             return (
               <button
                 key={item.id}
-                onClick={() => setCurrentPage(item.id)}
+                onClick={() => {
+                  setCurrentPage(item.id);
+                  setIsMobileSidebarOpen(false);
+                }}
                 className={`
                   w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 relative
                   ${isActive 
@@ -220,7 +273,7 @@ export default function InstructorCanvasLMS() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 to-blue-50/30">
+      <main className="flex-1 overflow-y-auto bg-gradient-to-br from-gray-50 to-blue-50/30 pt-16 lg:pt-0">
         {renderPage()}
       </main>
     </div>

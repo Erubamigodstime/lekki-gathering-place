@@ -49,7 +49,7 @@ async function apiCall(endpoint: string, options: RequestInit = {}) {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // Check if user is already logged in on mount
   useEffect(() => {
@@ -79,7 +79,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(null);
         }
       }
-      setLoading(false);
     };
     checkAuth();
   }, []);

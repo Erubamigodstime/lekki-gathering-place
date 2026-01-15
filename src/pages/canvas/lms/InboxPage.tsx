@@ -314,27 +314,38 @@ export default function StudentInboxPage({ classId, preSelectedRecipient, onClea
       }
 
       // Add classmates (other students) - filter approved enrollments only
-      if (classData.enrollments && Array.isArray(classData.enrollments)) {
-        const approvedEnrollments = classData.enrollments.filter(
-          (enrollment: any) => enrollment.status === 'APPROVED' && enrollment.student.userId !== currentUserId
+      // Handle both array and paginated response structures
+      let enrollmentsList = [];
+      if (classData.enrollments) {
+        // Check if it's a paginated response (has data property) or direct array
+        enrollmentsList = Array.isArray(classData.enrollments) 
+          ? classData.enrollments 
+          : (classData.enrollments.data || []);
+      }
+
+      if (enrollmentsList.length > 0) {
+        const approvedEnrollments = enrollmentsList.filter(
+          (enrollment: any) => enrollment.status === 'APPROVED' && enrollment.student?.userId !== currentUserId
         );
         
-        console.log('Total enrollments:', classData.enrollments.length);
+        console.log('Total enrollments:', enrollmentsList.length);
         console.log('Approved enrollments (excluding self):', approvedEnrollments.length);
         
         approvedEnrollments.forEach((enrollment: any) => {
-          const convData = conversationMap.get(enrollment.student.userId);
-          users.push({
-            id: enrollment.student.userId,
-            firstName: enrollment.student.user.firstName,
-            lastName: enrollment.student.user.lastName,
-            email: enrollment.student.user.email,
-            profilePicture: enrollment.student.user.profilePicture,
-            role: 'Student',
-            lastMessage: convData?.lastMessage,
-            unreadCount: convData?.unreadCount || 0,
-          });
-          console.log('Added classmate:', enrollment.student.user.firstName, enrollment.student.user.lastName);
+          if (enrollment.student?.user) {
+            const convData = conversationMap.get(enrollment.student.userId);
+            users.push({
+              id: enrollment.student.userId,
+              firstName: enrollment.student.user.firstName,
+              lastName: enrollment.student.user.lastName,
+              email: enrollment.student.user.email,
+              profilePicture: enrollment.student.user.profilePicture,
+              role: 'Student',
+              lastMessage: convData?.lastMessage,
+              unreadCount: convData?.unreadCount || 0,
+            });
+            console.log('Added classmate:', enrollment.student.user.firstName, enrollment.student.user.lastName);
+          }
         });
       } else {
         console.warn('No enrollments found in class data');

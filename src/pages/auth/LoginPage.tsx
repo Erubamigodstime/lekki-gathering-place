@@ -283,15 +283,6 @@ export default function LoginPage() {
             </Link>
           </p>
 
-          {/* Demo Credentials */}
-          <div className="mt-8 p-4 bg-muted rounded-lg">
-            <p className="text-sm font-medium text-muted-foreground mb-2">Demo Credentials:</p>
-            <div className="space-y-1 text-xs text-muted-foreground">
-              <p><span className="font-medium">Admin:</span> admin@church.org / admin123</p>
-              <p><span className="font-medium">Instructor:</span> instructor@church.org / instructor123</p>
-              <p><span className="font-medium">Student:</span> student@church.org / student123</p>
-            </div>
-          </div>
         </div>
       </div>
     </div>

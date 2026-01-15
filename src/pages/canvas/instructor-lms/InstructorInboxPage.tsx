@@ -272,7 +272,12 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
         }),
       ]);
 
-      const enrollments = enrollmentsResponse.data.data || [];
+      // Handle paginated enrollment response
+      const enrollmentsData = enrollmentsResponse.data.data;
+      const enrollments = Array.isArray(enrollmentsData) 
+        ? enrollmentsData 
+        : (enrollmentsData?.data || []);
+      
       const conversations = conversationsResponse.data.data || [];
 
       console.log('Fetched enrollments:', enrollments.length);
@@ -287,8 +292,8 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
         });
       });
 
-      // Merge enrollments with conversation data
-      const usersWithMessages = enrollments.map((enrollment: any) => {
+      // Merge enrollments with conversation data - ensure enrollments is an array
+      const usersWithMessages = Array.isArray(enrollments) ? enrollments.map((enrollment: any) => {
         const convData = conversationMap.get(enrollment.student.user.id);
         return {
           id: enrollment.student.user.id,
@@ -300,7 +305,7 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
           lastMessage: convData?.lastMessage,
           unreadCount: convData?.unreadCount || 0,
         };
-      });
+      }) : [];
 
       // Sort by: unread messages first, then by last message time, then by name
       usersWithMessages.sort((a: UserContact, b: UserContact) => {

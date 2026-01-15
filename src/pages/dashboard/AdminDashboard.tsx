@@ -5,7 +5,7 @@ import { TodayClassesCard } from '@/components/dashboard/TodayClassesCard';
 import { AttendanceChart } from '@/components/dashboard/AttendanceChart';
 import { PendingApprovalsCard } from '@/components/dashboard/PendingApprovalsCard';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,6 +18,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
 export default function AdminDashboard() {
   const { user } = useAuth();
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [stats, setStats] = useState({
     totalStudents: 0,
     totalInstructors: 0,
@@ -25,67 +26,62 @@ export default function AdminDashboard() {
     pendingApprovals: 0,
   });
   const [pendingInstructors, setPendingInstructors] = useState<any[]>([]);
-  const [pendingEnrollments, setPendingEnrollments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [createClassOpen, setCreateClassOpen] = useState(false);
   const [classes, setClasses] = useState<any[]>([]);
-  const [todayClasses, setTodayClasses] = useState<any[]>([]);
-  const [recentActivities, setRecentActivities] = useState<any[]>([]);
   const [attendanceData, setAttendanceData] = useState<any[]>([]);
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [timeFilter, setTimeFilter] = useState<string>('week');
 
   useEffect(() => {
     fetchDashboardData();
+    
+    return () => {
+      // Cleanup: abort ongoing requests when component unmounts
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   useEffect(() => {
     if (!loading) {
-      const token = localStorage.getItem('token');
-      const headers = { Authorization: `Bearer ${token}` };
-      fetchAttendanceData(headers);
+      fetchAttendanceData();
     }
   }, [selectedClass, timeFilter]);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
+      // Abort previous request if any
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      abortControllerRef.current = new AbortController();
+      const { signal } = abortControllerRef.current;
+      
       const token = localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
 
-      console.log('Admin Dashboard: Fetching data...');
-
-      // Fetch stats
-      const [studentsRes, instructorsRes, classesRes, pendingInstructorsRes] = await Promise.all([
-        axios.get(`${API_URL}/students`, { headers }),
-        axios.get(`${API_URL}/instructors`, { headers }),
-        axios.get(`${API_URL}/classes`, { headers }),
-        axios.get(`${API_URL}/instructors?status=PENDING`, { headers }),
+      // Fetch ALL essential data in parallel - no sequential waterfalls
+      const [studentsRes, instructorsRes, classesRes, pendingInstructorsRes, attendanceRes] = await Promise.all([
+        axios.get(`${API_URL}/students?page=1&limit=1`, { headers, signal }),
+        axios.get(`${API_URL}/instructors?page=1&limit=1`, { headers, signal }),
+        axios.get(`${API_URL}/classes?page=1&limit=20`, { headers, signal }),
+        axios.get(`${API_URL}/instructors?status=PENDING&page=1&limit=10`, { headers, signal }),
+        axios.get(`${API_URL}/attendance?page=1&limit=50`, { headers, signal })
       ]);
 
-      console.log('Pending instructors response:', pendingInstructorsRes.data);
-
-      const students = studentsRes.data.data.total || studentsRes.data.data.length || 0;
-      const instructors = instructorsRes.data.data.length || 0;
+      // Extract totals
+      const students = studentsRes.data.data.total || 0;
+      const instructors = instructorsRes.data.data.total || 0;
       
-      // Handle paginated or direct array response for classes
-      let allClasses = [];
-      if (Array.isArray(classesRes.data.data)) {
-        allClasses = classesRes.data.data;
-      } else if (classesRes.data.data.items && Array.isArray(classesRes.data.data.items)) {
-        allClasses = classesRes.data.data.items;
-      } else if (classesRes.data.data.data && Array.isArray(classesRes.data.data.data)) {
-        allClasses = classesRes.data.data.data;
-      }
-      
+      // Handle paginated response for classes
+      const allClasses = classesRes.data.data.data || classesRes.data.data.items || classesRes.data.data || [];
       const activeClasses = allClasses.filter((c: any) => c.status === 'ACTIVE');
-      const pendingInstr = pendingInstructorsRes.data.data || [];
-
-      console.log('Pending instructors count:', pendingInstr.length);
-      console.log('Pending instructors:', pendingInstr.map((i: any) => ({
-        id: i.id,
-        name: `${i.user?.firstName} ${i.user?.lastName}`,
-        approvalStatus: i.approvalStatus
-      })));
+      
+      // Handle paginated response for pending instructors
+      const pendingInstr = pendingInstructorsRes.data.data.data || pendingInstructorsRes.data.data || [];
 
       setStats({
         totalStudents: students,
@@ -96,94 +92,62 @@ export default function AdminDashboard() {
 
       setPendingInstructors(pendingInstr);
       setClasses(allClasses);
-
-      // Fetch today's classes
-      await fetchTodayClasses(allClasses, headers);
       
-      // Fetch recent activities
-      await fetchRecentActivities(headers);
-      
-      // Fetch attendance data
-      await fetchAttendanceData(headers);
+      // Process attendance data immediately - no separate API call
+      const attendanceRecords = attendanceRes.data.data.data || attendanceRes.data.data || [];
+      const processedData = processAttendanceByTimeFilter(attendanceRecords, timeFilter);
+      setAttendanceData(processedData);
     } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
+      if (axios.isCancel(error)) {
+        console.log('Request cancelled');
+      } else {
+        console.error('Failed to fetch dashboard data:', error);
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [timeFilter]);
 
-  const fetchTodayClasses = async (allClasses: any[], headers: any) => {
+  // Memoize today's classes computation
+  const todayClasses = useMemo(() => {
     const today = new Date().getDay();
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const todayName = dayNames[today];
+    return classes.filter((classItem: any) => classItem.schedule?.days?.includes(todayName));
+  }, [classes]);
+  
+  // Memoize recent activities - limit to top 5 from pending instructors
+  const recentActivities = useMemo(() => {
+    return pendingInstructors.slice(0, 5).map((instructor: any) => ({
+      id: `pending-${instructor.id}`,
+      user: { name: `${instructor.user?.firstName} ${instructor.user?.lastName}` },
+      action: 'requested instructor approval',
+      target: 'Instructor Role',
+      time: instructor.createdAt || new Date().toISOString(),
+      type: 'approval' as const,
+    }));
+  }, [pendingInstructors]);
 
-    const classesForToday = allClasses.filter((classItem: any) => {
-      return classItem.schedule?.days?.includes(todayName);
-    });
-
-    setTodayClasses(classesForToday);
-  };
-
-  const fetchRecentActivities = async (headers: any) => {
+  const fetchAttendanceData = useCallback(async () => {
     try {
-      // Fetch recent enrollments
-      const enrollmentsRes = await axios.get(`${API_URL}/enrollments`, {
-        headers,
-        params: { limit: 10 }
-      });
-
-      // Fetch recent attendance
-      const attendanceRes = await axios.get(`${API_URL}/attendance`, {
-        headers,
-        params: { limit: 10 }
-      });
-
-      const enrollments = (enrollmentsRes.data.data || []).map((e: any) => ({
-        id: `enr-${e.id}`,
-        user: { name: `${e.student?.user?.firstName} ${e.student?.user?.lastName}` },
-        action: e.status === 'APPROVED' ? 'enrolled in' : 'requested to join',
-        target: e.class?.name || 'a class',
-        time: getRelativeTime(e.enrolledAt),
-        type: 'enrollment' as const,
-      }));
-
-      const attendance = (attendanceRes.data.data || []).map((a: any) => ({
-        id: `att-${a.id}`,
-        user: { name: `${a.student?.user?.firstName} ${a.student?.user?.lastName}` },
-        action: 'marked attendance for',
-        target: a.class?.name || 'a class',
-        time: getRelativeTime(a.date),
-        type: 'attendance' as const,
-      }));
-
-      const combined = [...enrollments, ...attendance]
-        .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-        .slice(0, 4);
-
-      setRecentActivities(combined);
-    } catch (error) {
-      console.error('Failed to fetch recent activities:', error);
-    }
-  };
-
-  const fetchAttendanceData = async (headers: any) => {
-    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
       const classId = selectedClass === 'all' ? undefined : selectedClass;
-      const params: any = {};
       
-      if (classId) params.classId = classId;
-
-      const response = await axios.get(`${API_URL}/attendance`, { headers, params });
-      const attendanceRecords = response.data.data || [];
-
-      // Process attendance data based on time filter
+      // Only fetch last 50 records for chart - don't load all attendance
+      const response = await axios.get(`${API_URL}/attendance?page=1&limit=50`, { 
+        headers, 
+        params: classId ? { classId } : {} 
+      });
+      
+      const attendanceRecords = response.data.data.data || response.data.data || [];
       const processedData = processAttendanceByTimeFilter(attendanceRecords, timeFilter);
       setAttendanceData(processedData);
     } catch (error) {
       console.error('Failed to fetch attendance data:', error);
       setAttendanceData([]);
     }
-  };
+  }, [selectedClass, timeFilter]);
 
   const processAttendanceByTimeFilter = (records: any[], filter: string) => {
     const now = new Date();

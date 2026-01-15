@@ -63,16 +63,17 @@ export function PeopleList({ classId, userRole = 'STUDENT', onMessageUser }: Peo
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      // Transform enrollment data to members
-      const enrollments = response.data.data || [];
-      const membersList: ClassMember[] = enrollments.map((enrollment: any) => ({
+      // Transform enrollment data to members - handle paginated response
+      const enrollData = response.data.data;
+      const enrollments = Array.isArray(enrollData) ? enrollData : (enrollData?.data || []);
+      const membersList: ClassMember[] = Array.isArray(enrollments) ? enrollments.map((enrollment: any) => ({
         id: enrollment.student?.id || enrollment.studentId,
         firstName: enrollment.student?.user?.firstName || 'Unknown',
         lastName: enrollment.student?.user?.lastName || '',
         email: enrollment.student?.user?.email || '',
         role: 'STUDENT',
         enrollmentStatus: enrollment.status,
-      }));
+      })) : [];
 
       // Fetch instructor info
       const classResponse = await axios.get(`${API_URL}/classes/${classId}`, {
