@@ -277,6 +277,7 @@ export default function SignupPage() {
           <div 
             className="absolute w-[600px] h-[600px] rounded-full blur-3xl"
             style={{
+              backgroundColor: 'rgba(148, 163, 184, 0.2)',
               top: '10%',
               left: '-10%',
               background: 'radial-gradient(circle, rgba(27, 94, 61, 0.25) 0%, rgba(27, 94, 61, 0.12) 50%, transparent 100%)',
