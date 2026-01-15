@@ -28,23 +28,71 @@ interface AnnouncementsPageProps {
 export default function AnnouncementsPage({ classId }: AnnouncementsPageProps) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewedAnnouncements, setViewedAnnouncements] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchAnnouncements();
+    // Load previously viewed announcements from localStorage
+    const viewed = localStorage.getItem('viewedAnnouncements');
+    if (viewed) {
+      setViewedAnnouncements(new Set(JSON.parse(viewed)));
+    }
   }, [classId]);
+
+  useEffect(() => {
+    // Increment view count for newly loaded announcements
+    if (announcements.length > 0) {
+      announcements.forEach((announcement) => {
+        if (!viewedAnnouncements.has(announcement.id)) {
+          incrementViewCount(announcement.id);
+        }
+      });
+    }
+  }, [announcements]);
 
   const fetchAnnouncements = async () => {
     try {
       const token = localStorage.getItem('token');
+      console.log('=== Student Fetching Announcements ===');
+      console.log('ClassId:', classId);
+      console.log('API URL:', `${API_URL}/announcements/class/${classId}`);
+      
       const response = await axios.get(
         `${API_URL}/announcements/class/${classId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setAnnouncements(response.data.data || []);
+      
+      const fetchedAnnouncements = response.data.data || [];
+      console.log('Announcements received:', fetchedAnnouncements.length);
+      console.log('Student will see all announcements posted by instructor for this class');
+      
+      setAnnouncements(fetchedAnnouncements);
     } catch (error) {
       console.error('Failed to fetch announcements:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const incrementViewCount = async (announcementId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.patch(
+        `${API_URL}/announcements/${announcementId}/view`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      // Mark as viewed in localStorage
+      const newViewed = new Set(viewedAnnouncements);
+      newViewed.add(announcementId);
+      setViewedAnnouncements(newViewed);
+      localStorage.setItem('viewedAnnouncements', JSON.stringify([...newViewed]));
+    } catch (error) {
+      console.error('Failed to increment view count:', error);
     }
   };
 

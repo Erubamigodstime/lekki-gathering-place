@@ -1,35 +1,33 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, Send, ArrowLeft, User, Loader2, Plus, Check, CheckCheck } from 'lucide-react';
-import { Card } from '@/components/ui/card';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Search, Send, User, Loader2, Phone, Video, MoreVertical, Check, CheckCheck, Smile, Paperclip, Mic, Wifi, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { useSocket } from '@/hooks/useSocket';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
-interface Conversation {
-  partnerId: string;
-  partner: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    profilePicture?: string;
-    role: string;
-  };
-  lastMessage: {
-    id: string;
+interface UserContact {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  profilePicture?: string;
+  role: string;
+  lastMessage?: {
     content: string;
     createdAt: string;
     isFromMe: boolean;
     readAt: string | null;
   };
-  unreadCount: number;
+  unreadCount?: number;
+  isOnline?: boolean;
 }
 
 interface Message {
@@ -38,28 +36,13 @@ interface Message {
   createdAt: string;
   senderId: string;
   receiverId: string;
+  readAt?: string | null;
   sender: {
     id: string;
     firstName: string;
     lastName: string;
     profilePicture?: string;
   };
-  receiver: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    profilePicture?: string;
-  };
-}
-
-interface SearchUser {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  profilePicture?: string;
-  role: string;
-  className?: string;
 }
 
 interface InstructorInboxPageProps {
@@ -68,156 +51,384 @@ interface InstructorInboxPageProps {
 }
 
 export default function InstructorInboxPage({ classId, onUnreadChange }: InstructorInboxPageProps) {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [allUsers, setAllUsers] = useState<UserContact[]>([]);
+  const [filteredUsers, setFilteredUsers] = useState<UserContact[]>([]);
+  const [selectedUser, setSelectedUser] = useState<UserContact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  // In-memory cache for messages by userId
+  const messagesCache = useRef<{ [userId: string]: Message[] }>({});
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [showNewChat, setShowNewChat] = useState(false);
-  const [searchUsers, setSearchUsers] = useState<SearchUser[]>([]);
-  const [searchingUsers, setSearchingUsers] = useState(false);
-  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentUserId = localStorage.getItem('userId') || '';
+  const typingTimeoutRef = useRef<NodeJS.Timeout>();
 
-  useEffect(() => {
-    fetchConversations();
-    const interval = setInterval(fetchConversations, 10000); // Refresh every 10 seconds
-    return () => clearInterval(interval);
+  // ✨ WebSocket connection for real-time messaging
+  const { isConnected, emitTypingStart, emitTypingStop } = useSocket({
+    onNewMessage: (message) => {
+      // If message is from selected user, add to messages
+      if (selectedUser && (message.senderId === selectedUser.id || message.receiverId === selectedUser.id)) {
+        setMessages(prev => {
+          const isDuplicate = prev.some(m => m.id === message.id);
+          if (isDuplicate) return prev;
+          const updated = [...prev, message].sort((a, b) => 
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+          messagesCache.current[selectedUser.id] = updated;
+          return updated;
+        });
+      }
+      // Refresh conversation list
+      fetchAllUsersAndConversations();
+    },
+    onTypingStart: (data) => {
+      if (selectedUser && data.senderId === selectedUser.id) {
+        setIsTyping(true);
+      }
+    },
+    onTypingStop: (data) => {
+      if (selectedUser && data.senderId === selectedUser.id) {
+        setIsTyping(false);
+      }
+    },
+    onUserStatus: (data) => {
+      // Update user online status
+      setAllUsers(prev => prev.map(user => 
+        user.id === data.userId ? { ...user, isOnline: data.isOnline } : user
+      ));
+    },
+  });
+
+  // Deep equality check for messages array
+  const areMessagesEqual = useCallback((a: Message[], b: Message[]) => {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i].id !== b[i].id || a[i].content !== b[i].content || a[i].createdAt !== b[i].createdAt || a[i].senderId !== b[i].senderId || a[i].receiverId !== b[i].receiverId) {
+        return false;
+      }
+    }
+    return true;
   }, []);
 
-  useEffect(() => {
-    if (selectedConversation) {
-      fetchMessages(selectedConversation.partnerId);
-      const interval = setInterval(() => fetchMessages(selectedConversation.partnerId), 5000);
-      return () => clearInterval(interval);
-    }
-  }, [selectedConversation]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  const fetchConversations = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/messages/conversations`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const convs = response.data.data || [];
-      setConversations(convs);
-      
-      // Update unread count
-      const totalUnread = convs.reduce((sum: number, conv: Conversation) => sum + conv.unreadCount, 0);
-      onUnreadChange?.(totalUnread);
-    } catch (error) {
-      console.error('Failed to fetch conversations:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchMessages = async (partnerId: string) => {
+  const fetchMessages = useCallback(async (partnerId: string) => {
+    setMessagesLoading(true);
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_URL}/messages/thread/${partnerId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setMessages(response.data.data || []);
+      // Always sort by createdAt ascending
+      const msgs = (response.data.data || []).slice().sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      // Only update if different
+      if (!areMessagesEqual(msgs, messagesCache.current[partnerId] || [])) {
+        setMessages(msgs);
+        messagesCache.current[partnerId] = msgs;
+      }
+      // Mark messages as read
+      await axios.post(
+        `${API_URL}/messages/thread/${partnerId}/mark-read`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      ).catch(() => {});
     } catch (error) {
       console.error('Failed to fetch messages:', error);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [areMessagesEqual]);
+
+  useEffect(() => {
+    fetchAllUsersAndConversations();
+    
+    // ✨ Reduced polling: only as fallback when WebSocket disconnected
+    let interval: NodeJS.Timeout;
+    
+    const startPolling = () => {
+      // Poll every 30s if WebSocket connected, every 10s if disconnected
+      const pollInterval = isConnected ? 30000 : 10000;
+      interval = setInterval(fetchAllUsersAndConversations, pollInterval);
+    };
+    
+    const stopPolling = () => {
+      if (interval) clearInterval(interval);
+    };
+    
+    // Start polling initially
+    startPolling();
+    
+    // Listen for visibility changes
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        fetchAllUsersAndConversations(); // Refresh immediately when tab becomes visible
+        startPolling();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [classId, isConnected]);
+
+
+  // Optimistically clear chat and show cached messages instantly
+  useEffect(() => {
+    if (selectedUser) {
+      // Show cached messages instantly (if any)
+      setMessages(messagesCache.current[selectedUser.id] || []);
+      setMessagesLoading(true);
+      fetchMessages(selectedUser.id);
+      
+      // ✨ Reduced polling: WebSocket handles real-time, polling is backup
+      let interval: NodeJS.Timeout;
+      
+      const startPolling = () => {
+        // Poll every 60s if WebSocket connected, every 15s if disconnected
+        const pollInterval = isConnected ? 60000 : 15000;
+        interval = setInterval(() => fetchMessages(selectedUser.id), pollInterval);
+      };
+      
+      const stopPolling = () => {
+        if (interval) clearInterval(interval);
+      };
+      
+      startPolling();
+      
+      const handleVisibilityChange = () => {
+        if (document.hidden) {
+          stopPolling();
+        } else {
+          fetchMessages(selectedUser.id); // Refresh immediately
+          startPolling();
+        }
+      };
+      
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      
+      return () => {
+        stopPolling();
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    } else {
+      setMessages([]);
+      setIsTyping(false);
+    }
+  }, [selectedUser, fetchMessages, isConnected]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
+    // Filter users based on search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      const filtered = allUsers.filter(user => {
+        const fullName = `${user.firstName} ${user.lastName}`.toLowerCase();
+        const email = user.email.toLowerCase();
+        return fullName.includes(query) || email.includes(query);
+      });
+      setFilteredUsers(filtered);
+    } else {
+      setFilteredUsers(allUsers);
+    }
+  }, [searchQuery, allUsers]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const fetchAllUsersAndConversations = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!classId) {
+        console.error('No classId provided to InstructorInboxPage');
+        toast.error('Class information missing');
+        setLoading(false);
+        return;
+      }
+
+      console.log('Fetching students for classId:', classId);
+      
+      // Fetch all enrollments (students) in the class
+      const [enrollmentsResponse, conversationsResponse] = await Promise.all([
+        axios.get(`${API_URL}/enrollments/class/${classId}?status=APPROVED`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        axios.get(`${API_URL}/messages/conversations`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch((err) => {
+          console.warn('Conversations endpoint failed, continuing with empty conversations:', err.message);
+          return { data: { data: [] } };
+        }),
+      ]);
+
+      const enrollments = enrollmentsResponse.data.data || [];
+      const conversations = conversationsResponse.data.data || [];
+
+      console.log('Fetched enrollments:', enrollments.length);
+      console.log('Fetched conversations:', conversations.length);
+
+      // Create a map of conversation data by partner ID
+      const conversationMap = new Map();
+      conversations.forEach((conv: any) => {
+        conversationMap.set(conv.partnerId, {
+          lastMessage: conv.lastMessage,
+          unreadCount: conv.unreadCount,
+        });
+      });
+
+      // Merge enrollments with conversation data
+      const usersWithMessages = enrollments.map((enrollment: any) => {
+        const convData = conversationMap.get(enrollment.student.user.id);
+        return {
+          id: enrollment.student.user.id,
+          firstName: enrollment.student.user.firstName,
+          lastName: enrollment.student.user.lastName,
+          email: enrollment.student.user.email,
+          profilePicture: enrollment.student.user.profilePicture,
+          role: 'Student',
+          lastMessage: convData?.lastMessage,
+          unreadCount: convData?.unreadCount || 0,
+        };
+      });
+
+      // Sort by: unread messages first, then by last message time, then by name
+      usersWithMessages.sort((a: UserContact, b: UserContact) => {
+        // Unread messages first
+        if (a.unreadCount && !b.unreadCount) return -1;
+        if (!a.unreadCount && b.unreadCount) return 1;
+        
+        // Then by last message time
+        if (a.lastMessage && b.lastMessage) {
+          return new Date(b.lastMessage.createdAt).getTime() - new Date(a.lastMessage.createdAt).getTime();
+        }
+        if (a.lastMessage && !b.lastMessage) return -1;
+        if (!a.lastMessage && b.lastMessage) return 1;
+        
+        // Finally by name
+        const nameA = `${a.firstName} ${a.lastName}`;
+        const nameB = `${b.firstName} ${b.lastName}`;
+        return nameA.localeCompare(nameB);
+      });
+
+      setAllUsers(usersWithMessages);
+      setFilteredUsers(usersWithMessages);
+
+      // Update unread count
+      const totalUnread = usersWithMessages.reduce((sum: number, user: UserContact) => sum + (user.unreadCount || 0), 0);
+      onUnreadChange?.(totalUnread);
+    } catch (error: any) {
+      console.error('Failed to fetch users and conversations:', error);
+      
+      // More specific error message
+      if (error.message) {
+        toast.error(error.message);
+      } else if (error.response?.status === 404) {
+        toast.error('Class not found or you are not enrolled as an instructor');
+      } else if (error.response?.status === 401) {
+        toast.error('Session expired. Please log in again.');
+      } else {
+        toast.error('Failed to load contacts. Please refresh the page.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedConversation) return;
+    if (!newMessage.trim() || !selectedUser || sending) return;
 
     setSending(true);
+    const messageContent = newMessage.trim();
+    setNewMessage(''); // Clear input immediately for better UX
+    
     try {
       const token = localStorage.getItem('token');
-      await axios.post(
+      console.log('Sending message to:', selectedUser.id, 'Content:', messageContent);
+      
+      const response = await axios.post(
         `${API_URL}/messages/direct`,
         {
-          receiverId: selectedConversation.partnerId,
-          content: newMessage.trim(),
+          receiverId: selectedUser.id,
+          content: messageContent,
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { 
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          } 
+        }
       );
 
-      setNewMessage('');
-      await fetchMessages(selectedConversation.partnerId);
-      await fetchConversations();
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      toast.error('Failed to send message');
+      console.log('Message sent successfully:', response.data);
+      toast.success('Message sent');
+      
+      // Refresh messages and conversations
+      await Promise.all([
+        fetchMessages(selectedUser.id),
+        fetchAllUsersAndConversations(),
+      ]);
+    } catch (error: any) {
+      console.error('Failed to send message:', error.response?.data || error.message);
+      
+      // Restore the message if send failed
+      setNewMessage(messageContent);
+      
+      if (error.response?.status === 401) {
+        toast.error('Session expired. Please log in again.');
+      } else if (error.response?.status === 404) {
+        toast.error('Recipient not found');
+      } else {
+        toast.error(error.response?.data?.message || 'Failed to send message');
+      }
     } finally {
       setSending(false);
+      // Stop typing indicator
+      if (selectedUser) {
+        emitTypingStop(selectedUser.id);
+      }
     }
   };
 
-  const handleSearchUsers = async (query: string) => {
-    if (!query.trim()) {
-      setSearchUsers([]);
-      return;
-    }
-
-    setSearchingUsers(true);
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/messages/search/users?q=${encodeURIComponent(query)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setSearchUsers(response.data.data || []);
-    } catch (error) {
-      console.error('Failed to search users:', error);
-      toast.error('Failed to search users');
-    } finally {
-      setSearchingUsers(false);
-    }
-  };
-
-  const handleStartNewChat = (user: SearchUser) => {
-    const existingConversation = conversations.find(c => c.partnerId === user.id);
+  // Handle typing indicator
+  const handleMessageChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setNewMessage(e.target.value);
     
-    if (existingConversation) {
-      setSelectedConversation(existingConversation);
-    } else {
-      setSelectedConversation({
-        partnerId: user.id,
-        partner: {
-          id: user.id,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          profilePicture: user.profilePicture,
-          role: user.role,
-        },
-        lastMessage: {
-          id: '',
-          content: '',
-          createdAt: new Date().toISOString(),
-          isFromMe: false,
-          readAt: null,
-        },
-        unreadCount: 0,
-      });
-      setMessages([]);
+    if (selectedUser && e.target.value.trim()) {
+      // Emit typing start
+      emitTypingStart(selectedUser.id);
+      
+      // Clear previous timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      // Emit typing stop after 2 seconds of inactivity
+      typingTimeoutRef.current = setTimeout(() => {
+        emitTypingStop(selectedUser.id);
+      }, 2000);
+    } else if (selectedUser) {
+      emitTypingStop(selectedUser.id);
     }
-    
-    setShowNewChat(false);
-    setUserSearchQuery('');
-    setSearchUsers([]);
   };
 
-  const filteredConversations = conversations.filter(conv => {
-    const fullName = `${conv.partner.firstName} ${conv.partner.lastName}`.toLowerCase();
-    return fullName.includes(searchQuery.toLowerCase());
-  });
+  const handleUserSelect = (user: UserContact) => {
+    setSelectedUser(user);
+    setMessages([]); // Optimistically clear chat area instantly
+    setMessagesLoading(true);
+    // Reset unread count for this user locally
+    setAllUsers(prev => prev.map(u => u.id === user.id ? { ...u, unreadCount: 0 } : u));
+  };
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
@@ -239,98 +450,121 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-screen bg-gray-50">
         <Loader2 className="h-8 w-8 animate-spin text-church-gold" />
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Sidebar - Conversations List */}
-      <div className="w-96 bg-white border-r border-gray-200 flex flex-col">
+    <div className="flex h-screen bg-[#0a1628]">
+      {/* Left Sidebar - All Students */}
+      <div className="w-[380px] bg-white border-r border-gray-200 flex flex-col">
         {/* Header */}
-        <div className="p-4 border-b border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-gray-900">Messages</h2>
-            <Button
-              onClick={() => setShowNewChat(true)}
-              size="sm"
-              className="bg-gradient-to-r from-church-gold to-yellow-600"
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              New
-            </Button>
+        <div className="bg-[#f0f2f5] p-4 border-b border-gray-200">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xl font-semibold text-gray-900">Students</h2>
+            {/* Connection Status */}
+            <div className="flex items-center gap-2">
+              {isConnected ? (
+                <>
+                  <Wifi className="h-4 w-4 text-green-600" />
+                  <span className="text-xs text-green-600 font-medium">Real-time</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="h-4 w-4 text-amber-500" />
+                  <span className="text-xs text-amber-600 font-medium">Fallback</span>
+                </>
+              )}
+            </div>
           </div>
-          
-          {/* Search */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="Search conversations..."
+              placeholder="Search students..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-10 bg-white rounded-lg border-gray-300"
             />
           </div>
         </div>
 
-        {/* Conversations List */}
+        {/* Users List */}
         <ScrollArea className="flex-1">
-          {filteredConversations.length === 0 ? (
+          {filteredUsers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center px-4">
               <div className="bg-gray-100 rounded-full p-4 mb-4">
                 <User className="h-8 w-8 text-gray-400" />
               </div>
-              <h3 className="font-semibold text-gray-900 mb-2">No conversations yet</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Start messaging your students by clicking the "New" button above
+              <h3 className="font-semibold text-gray-900 mb-2">
+                {searchQuery ? 'No students found' : 'No students yet'}
+              </h3>
+              <p className="text-sm text-gray-600">
+                {searchQuery ? 'Try a different search term' : 'Students will appear here once they enroll'}
               </p>
             </div>
           ) : (
-            filteredConversations.map((conversation) => (
+            filteredUsers.map((user) => (
               <div
-                key={conversation.partnerId}
-                onClick={() => setSelectedConversation(conversation)}
-                className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${
-                  selectedConversation?.partnerId === conversation.partnerId ? 'bg-blue-50' : ''
+                key={user.id}
+                onClick={() => handleUserSelect(user)}
+                className={`p-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${
+                  selectedUser?.id === user.id ? 'bg-[#f0f2f5]' : ''
                 }`}
               >
                 <div className="flex items-start gap-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={conversation.partner.profilePicture} />
-                    <AvatarFallback className="bg-gradient-to-br from-church-gold to-yellow-600 text-white">
-                      {getInitials(conversation.partner.firstName, conversation.partner.lastName)}
-                    </AvatarFallback>
-                  </Avatar>
+                  <div className="relative">
+                    <Avatar className="h-12 w-12">
+                      <AvatarImage src={user.profilePicture} />
+                      <AvatarFallback className="bg-gradient-to-br from-church-gold to-yellow-600 text-white font-semibold">
+                        {getInitials(user.firstName, user.lastName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    {user.isOnline && (
+                      <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                    )}
+                  </div>
                   
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
-                      <h3 className="font-semibold text-gray-900 truncate">
-                        {conversation.partner.firstName} {conversation.partner.lastName}
+                      <h3 className={`font-semibold truncate ${
+                        user.unreadCount ? 'text-gray-900' : 'text-gray-700'
+                      }`}>
+                        {user.firstName} {user.lastName}
                       </h3>
-                      <span className="text-xs text-gray-500">
-                        {formatTime(conversation.lastMessage.createdAt)}
-                      </span>
+                      {user.lastMessage && (
+                        <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
+                          {formatTime(user.lastMessage.createdAt)}
+                        </span>
+                      )}
                     </div>
                     
                     <div className="flex items-center justify-between">
-                      <p className="text-sm text-gray-600 truncate flex-1">
-                        {conversation.lastMessage.isFromMe && (
-                          <span className="mr-1">
-                            {conversation.lastMessage.readAt ? (
-                              <CheckCheck className="inline h-3 w-3 text-blue-500" />
-                            ) : (
-                              <Check className="inline h-3 w-3 text-gray-400" />
-                            )}
-                          </span>
-                        )}
-                        {conversation.lastMessage.content || 'No messages yet'}
-                      </p>
+                      {user.lastMessage ? (
+                        <p className={`text-sm truncate flex-1 ${
+                          user.unreadCount ? 'text-gray-900 font-medium' : 'text-gray-600'
+                        }`}>
+                          {user.lastMessage.isFromMe && (
+                            <span className="mr-1">
+                              {user.lastMessage.readAt ? (
+                                <CheckCheck className="inline h-3 w-3 text-blue-500" />
+                              ) : (
+                                <Check className="inline h-3 w-3 text-gray-400" />
+                              )}
+                            </span>
+                          )}
+                          {user.lastMessage.content}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-gray-400 truncate flex-1">
+                          No messages yet
+                        </p>
+                      )}
                       
-                      {conversation.unreadCount > 0 && (
-                        <Badge className="bg-church-gold text-white ml-2">
-                          {conversation.unreadCount}
+                      {user.unreadCount && user.unreadCount > 0 && (
+                        <Badge className="bg-church-gold text-white ml-2 min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full">
+                          {user.unreadCount}
                         </Badge>
                       )}
                     </div>
@@ -342,46 +576,62 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
         </ScrollArea>
       </div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {selectedConversation ? (
+      {/* Right Chat Area */}
+      <div className="flex-1 flex flex-col bg-[#e5ddd5]">
+        {selectedUser ? (
           <>
             {/* Chat Header */}
-            <div className="bg-white border-b border-gray-200 p-4">
+            <div className="bg-[#f0f2f5] border-b border-gray-200 px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedConversation(null)}
-                  className="lg:hidden"
-                >
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-                
                 <Avatar className="h-10 w-10">
-                  <AvatarImage src={selectedConversation.partner.profilePicture} />
-                  <AvatarFallback className="bg-gradient-to-br from-church-gold to-yellow-600 text-white">
-                    {getInitials(selectedConversation.partner.firstName, selectedConversation.partner.lastName)}
+                  <AvatarImage src={selectedUser.profilePicture} />
+                  <AvatarFallback className="bg-gradient-to-br from-church-gold to-yellow-600 text-white font-semibold">
+                    {getInitials(selectedUser.firstName, selectedUser.lastName)}
                   </AvatarFallback>
                 </Avatar>
                 
                 <div>
                   <h2 className="font-semibold text-gray-900">
-                    {selectedConversation.partner.firstName} {selectedConversation.partner.lastName}
+                    {selectedUser.firstName} {selectedUser.lastName}
                   </h2>
-                  <p className="text-xs text-gray-500">
-                    {selectedConversation.partner.role}
+                  <p className="text-xs text-gray-600">
+                    {selectedUser.isOnline ? 'Online' : selectedUser.role}
                   </p>
                 </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-gray-900">
+                  <Video className="h-5 w-5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-gray-900">
+                  <Phone className="h-5 w-5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-gray-900">
+                  <MoreVertical className="h-5 w-5" />
+                </Button>
               </div>
             </div>
 
             {/* Messages Area */}
-            <ScrollArea className="flex-1 p-4 bg-gray-50">
-              <div className="space-y-4 max-w-4xl mx-auto">
-                {messages.length === 0 ? (
+            <ScrollArea className="flex-1 p-4" style={{ backgroundImage: 'url("/chat-bg.png")', backgroundSize: 'cover' }}>
+              <div className="space-y-2 max-w-5xl mx-auto">
+                {messagesLoading ? (
+                  // Skeleton loader for chat area
+                  Array.from({ length: 6 }).map((_, idx) => (
+                    <div key={idx} className="flex justify-start animate-pulse">
+                      <div className="max-w-[65%] mr-auto">
+                        <div className="rounded-lg px-3 py-4 bg-gray-200 mb-2 w-40 h-4" />
+                      </div>
+                    </div>
+                  ))
+                ) : messages.length === 0 ? (
                   <div className="text-center py-12">
-                    <p className="text-gray-500">No messages yet. Start the conversation!</p>
+                    <div className="bg-white/80 backdrop-blur-sm rounded-lg p-6 inline-block shadow-sm">
+                      <User className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600 font-medium">Start the conversation!</p>
+                      <p className="text-sm text-gray-500 mt-1">Send a message to {selectedUser.firstName}</p>
+                    </div>
                   </div>
                 ) : (
                   messages.map((message) => {
@@ -391,139 +641,103 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
                         key={message.id}
                         className={`flex ${isFromMe ? 'justify-end' : 'justify-start'}`}
                       >
-                        <div className={`flex gap-2 max-w-[70%] ${isFromMe ? 'flex-row-reverse' : ''}`}>
-                          {!isFromMe && (
-                            <Avatar className="h-8 w-8">
-                              <AvatarImage src={message.sender.profilePicture} />
-                              <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
-                                {getInitials(message.sender.firstName, message.sender.lastName)}
-                              </AvatarFallback>
-                            </Avatar>
-                          )}
-                          
-                          <div className={`rounded-lg px-4 py-2 ${
+                        <div className={`max-w-[65%] ${isFromMe ? 'ml-auto' : 'mr-auto'}`}>
+                          <div className={`rounded-lg px-3 py-2 shadow-sm ${
                             isFromMe 
-                              ? 'bg-gradient-to-r from-church-gold to-yellow-600 text-white' 
-                              : 'bg-white border border-gray-200'
+                              ? 'bg-[#dcf8c6] text-gray-900' 
+                              : 'bg-white text-gray-900'
                           }`}>
-                            <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-                            <p className={`text-xs mt-1 ${
-                              isFromMe ? 'text-yellow-100' : 'text-gray-500'
-                            }`}>
-                              {formatTime(message.createdAt)}
+                            <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                              {message.content}
                             </p>
+                            <div className={`flex items-center justify-end gap-1 mt-1`}>
+                              <span className="text-[10px] text-gray-600">
+                                {formatTime(message.createdAt)}
+                              </span>
+                              {isFromMe && (
+                                message.readAt ? (
+                                  <CheckCheck className="h-3 w-3 text-blue-500" />
+                                ) : (
+                                  <Check className="h-3 w-3 text-gray-500" />
+                                )
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
                     );
                   })
                 )}
+                {isTyping && (
+                  <div className="flex justify-start">
+                    <div className="bg-white rounded-lg px-4 py-3 shadow-sm">
+                      <div className="flex gap-1">
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
             </ScrollArea>
 
             {/* Message Input */}
-            <div className="bg-white border-t border-gray-200 p-4">
-              <div className="flex gap-2 max-w-4xl mx-auto">
+            <div className="bg-[#f0f2f5] px-4 py-3 border-t border-gray-200">
+              <div className="flex items-end gap-2 max-w-5xl mx-auto">
+                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-gray-900 mb-1">
+                  <Smile className="h-5 w-5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="text-gray-600 hover:text-gray-900 mb-1">
+                  <Paperclip className="h-5 w-5" />
+                </Button>
                 <Textarea
-                  placeholder="Type a message..."
+                  placeholder="Type a message"
                   value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
+                  onChange={handleMessageChange}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       handleSendMessage();
                     }
                   }}
-                  className="resize-none"
+                  className="resize-none bg-white rounded-lg border-gray-300 min-h-[42px] max-h-[120px]"
                   rows={1}
                 />
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!newMessage.trim() || sending}
-                  className="bg-gradient-to-r from-church-gold to-yellow-600"
-                >
-                  {sending ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <Send className="h-5 w-5" />
-                  )}
-                </Button>
+                {newMessage.trim() ? (
+                  <Button
+                    onClick={handleSendMessage}
+                    disabled={sending}
+                    size="icon"
+                    className="bg-church-gold hover:bg-yellow-600 text-white mb-1"
+                  >
+                    {sending ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <Send className="h-5 w-5" />
+                    )}
+                  </Button>
+                ) : (
+                  <Button variant="ghost" size="icon" className="text-gray-600 hover:text-gray-900 mb-1">
+                    <Mic className="h-5 w-5" />
+                  </Button>
+                )}
               </div>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-50">
+          <div className="flex-1 flex items-center justify-center bg-[#f8f9fa]">
             <div className="text-center">
-              <div className="bg-gray-100 rounded-full p-6 inline-block mb-4">
-                <User className="h-12 w-12 text-gray-400" />
+              <div className="bg-white rounded-full p-8 inline-block mb-4 shadow-lg">
+                <User className="h-16 w-16 text-gray-400" />
               </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Select a conversation</h3>
-              <p className="text-gray-600">Choose a conversation from the left or start a new one</p>
+              <h3 className="text-2xl font-semibold text-gray-900 mb-2">Welcome to Inbox</h3>
+              <p className="text-gray-600 text-lg">Select a student to start messaging</p>
             </div>
           </div>
         )}
       </div>
-
-      {/* New Chat Dialog */}
-      <Dialog open={showNewChat} onOpenChange={setShowNewChat}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>New Message</DialogTitle>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search students..."
-                value={userSearchQuery}
-                onChange={(e) => {
-                  setUserSearchQuery(e.target.value);
-                  handleSearchUsers(e.target.value);
-                }}
-                className="pl-10"
-              />
-            </div>
-
-            <ScrollArea className="h-64">
-              {searchingUsers ? (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-church-gold" />
-                </div>
-              ) : searchUsers.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  {userSearchQuery ? 'No students found' : 'Search for students to message'}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {searchUsers.map((user) => (
-                    <div
-                      key={user.id}
-                      onClick={() => handleStartNewChat(user)}
-                      className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
-                    >
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={user.profilePicture} />
-                        <AvatarFallback className="bg-gradient-to-br from-church-gold to-yellow-600 text-white">
-                          {getInitials(user.firstName, user.lastName)}
-                        </AvatarFallback>
-                      </Avatar>
-                      
-                      <div className="flex-1">
-                        <h4 className="font-medium text-gray-900">
-                          {user.firstName} {user.lastName}
-                        </h4>
-                        <p className="text-sm text-gray-600">{user.className || user.email}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -54,14 +54,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Check if user is already logged in on mount
   useEffect(() => {
     const checkAuth = async () => {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
       if (token) {
         try {
+          // Ensure token is set for API calls
+          if (!localStorage.getItem('token')) {
+            localStorage.setItem('token', token);
+          }
+          
           const response = await apiCall('/auth/profile');
           setUser(response.data);
+          
+          // Ensure userId is stored
+          if (response.data?.id && !localStorage.getItem('userId')) {
+            localStorage.setItem('userId', response.data.id);
+          }
         } catch (error) {
+          console.error('Auth check failed:', error);
+          // Clear all auth tokens on error
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          setUser(null);
         }
       }
       setLoading(false);

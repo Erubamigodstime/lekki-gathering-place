@@ -15,7 +15,9 @@ import {
   Upload,
   File,
   FileVideo,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Calendar,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,9 +49,11 @@ interface Lesson {
   id: string;
   title: string;
   content: string;
-  week: number;
-  order: number;
-  published: boolean;
+  weekNumber: number;
+  orderIndex: number;
+  isPublished: boolean;
+  description?: string;
+  courseMaterials?: CourseMaterial[];
 }
 
 interface WeekModule {
@@ -102,15 +106,21 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
   // Form state
   const [formData, setFormData] = useState({
     title: '',
-    content: '',
-    week: 1,
-    order: 1,
-    published: false,
+    description: '',
+    weekNumber: 1,
+    orderIndex: 0,
+    isPublished: false,
   });
 
   // File upload state
   const [courseMaterials, setCourseMaterials] = useState<CourseMaterial[]>([]);
   const [uploadingFile, setUploadingFile] = useState(false);
+
+  // Action loading states
+  const [savingLesson, setSavingLesson] = useState(false);
+  const [deletingLesson, setDeletingLesson] = useState<string | null>(null);
+  const [publishingLesson, setPublishingLesson] = useState<string | null>(null);
+  const [deletingMaterial, setDeletingMaterial] = useState<string | null>(null);
 
   const [classData, setClassData] = useState<any>(null);
 
@@ -161,12 +171,19 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
       const totalWeeks = currentClassData?.totalWeeks || 10;
       const weeklySchedule = currentClassData?.schedule?.weeklyLessons || [];
 
+      console.log('=== Fetching Modules ===');
+      console.log('Class Data:', currentClassData);
+      console.log('Schedule:', currentClassData?.schedule);
+      console.log('Weekly Lessons in Schedule:', weeklySchedule);
+      console.log('Fetched lessons:', lessonsData);
+      console.log('Total weeks:', totalWeeks);
+
       // Group lessons by week
       const modulesMap = new Map<number, WeekModule>();
       
       for (let week = 1; week <= totalWeeks; week++) {
-        const weekLessons = lessonsData.filter((l: any) => l.week === week);
-        const publishedCount = weekLessons.filter((l: any) => l.published).length;
+        const weekLessons = lessonsData.filter((l: any) => l.weekNumber === week);
+        const publishedCount = weekLessons.filter((l: any) => l.isPublished).length;
         const scheduleData = weeklySchedule.find((s: any) => s.week === week);
         
         modulesMap.set(week, {
@@ -214,10 +231,10 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
     setCourseMaterials([]); // Clear materials for new lesson
     setFormData({
       title: '',
-      content: '',
-      week: 1,
-      order: 1,
-      published: false,
+      description: '',
+      weekNumber: 1,
+      orderIndex: 0,
+      isPublished: false,
     });
     setShowCreateDialog(true);
   };
@@ -229,49 +246,37 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
       return;
     }
 
-    // Pre-populate from schedule
-    const content = `
-      <div class="space-y-6">
-        ${scheduleData.objectives ? `
-          <div class="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-500">
-            <h3 class="text-lg font-semibold text-blue-900 mb-3">Learning Objectives</h3>
-            <ul class="space-y-2">
-              ${scheduleData.objectives.map((obj: string) => `
-                <li class="flex items-start">
-                  <span class="text-blue-500 mr-2">✓</span>
-                  <span>${obj}</span>
-                </li>
-              `).join('')}
-            </ul>
-          </div>
-        ` : ''}
-        ${scheduleData.activities ? `
-          <div class="bg-green-50 p-4 rounded-lg border-l-4 border-green-500">
-            <h3 class="text-lg font-semibold text-green-900 mb-3">Activities</h3>
-            <ul class="space-y-2">
-              ${scheduleData.activities.map((act: string) => `
-                <li class="flex items-start">
-                  <span class="text-green-500 mr-2">→</span>
-                  <span>${act}</span>
-                </li>
-              `).join('')}
-            </ul>
-          </div>
-        ` : ''}
-        <div class="bg-yellow-50 p-4 rounded-lg border-l-4 border-yellow-500">
-          <h3 class="text-lg font-semibold text-yellow-900 mb-2">Instructor Notes</h3>
-          <p class="text-gray-700">Add additional details, resources, or instructions here...</p>
-        </div>
-      </div>
-    `.trim();
+    // Build description from schedule data
+    let description = scheduleData.title || `Week ${week} Lesson`;
+    
+    if (scheduleData.objectives && scheduleData.objectives.length > 0) {
+      description += '\n\nLearning Objectives:\n';
+      scheduleData.objectives.forEach((obj: string) => {
+        description += `- ${obj}\n`;
+      });
+    }
+    
+    if (scheduleData.activities && scheduleData.activities.length > 0) {
+      description += '\nActivities:\n';
+      scheduleData.activities.forEach((act: string) => {
+        description += `- ${act}\n`;
+      });
+    }
+
+    if (scheduleData.topics && scheduleData.topics.length > 0) {
+      description += '\nTopics:\n';
+      scheduleData.topics.forEach((topic: string) => {
+        description += `- ${topic}\n`;
+      });
+    }
 
     setEditingLesson(null);
     setFormData({
       title: scheduleData.title || `Week ${week} Lesson`,
-      content: content,
-      week: week,
-      order: 1,
-      published: false,
+      description: description,
+      weekNumber: week,
+      orderIndex: 0,
+      isPublished: true, // ✅ Publish by default when creating from schedule
     });
     setShowCreateDialog(true);
   };
@@ -280,16 +285,17 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
     setEditingLesson(lesson);
     setFormData({
       title: lesson.title,
-      content: lesson.content,
-      week: lesson.week,
-      order: lesson.order,
-      published: lesson.published,
+      description: lesson.description || '',
+      weekNumber: lesson.weekNumber,
+      orderIndex: lesson.orderIndex,
+      isPublished: lesson.isPublished,
     });
     fetchCourseMaterials(lesson.id); // Load materials for editing
     setShowCreateDialog(true);
   };
 
   const handleSaveLesson = async () => {
+    setSavingLesson(true);
     try {
       const token = localStorage.getItem('token');
       
@@ -316,12 +322,15 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
     } catch (error) {
       console.error('Failed to save lesson:', error);
       toast.error('Failed to save lesson');
+    } finally {
+      setSavingLesson(false);
     }
   };
 
   const handleDeleteLesson = async (lessonId: string) => {
     if (!confirm('Are you sure you want to delete this lesson?')) return;
     
+    setDeletingLesson(lessonId);
     try {
       const token = localStorage.getItem('token');
       await axios.delete(`${API_URL}/lessons/${lessonId}`, {
@@ -332,22 +341,27 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
     } catch (error) {
       console.error('Failed to delete lesson:', error);
       toast.error('Failed to delete lesson');
+    } finally {
+      setDeletingLesson(null);
     }
   };
 
   const handleTogglePublish = async (lesson: Lesson) => {
+    setPublishingLesson(lesson.id);
     try {
       const token = localStorage.getItem('token');
       await axios.put(
         `${API_URL}/lessons/${lesson.id}`,
-        { published: !lesson.published },
+        { isPublished: !lesson.isPublished },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(lesson.published ? 'Lesson unpublished' : 'Lesson published!');
+      toast.success(lesson.isPublished ? 'Lesson unpublished' : 'Lesson published!');
       fetchModules();
     } catch (error) {
       console.error('Failed to toggle publish:', error);
       toast.error('Failed to update lesson');
+    } finally {
+      setPublishingLesson(null);
     }
   };
 
@@ -438,6 +452,7 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
   const handleDeleteMaterial = async (materialId: string, lessonId: string) => {
     if (!confirm('Are you sure you want to delete this file?')) return;
 
+    setDeletingMaterial(materialId);
     try {
       const token = localStorage.getItem('token');
       await axios.delete(`${API_URL}/course-materials/${materialId}`, {
@@ -448,6 +463,8 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
     } catch (error) {
       console.error('Failed to delete file:', error);
       toast.error('Failed to delete file');
+    } finally {
+      setDeletingMaterial(null);
     }
   };
 
@@ -632,34 +649,103 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
 
               {expandedWeeks.has(module.week) && (
                 <CardContent className="p-6">
+                  {/* Class Schedule Info - Always show if exists */}
+                  {(() => {
+                    const scheduleData = classData?.schedule?.weeklyLessons?.find((s: any) => s.week === module.week);
+                    
+                    // Show schedule info box
+                    return (
+                      <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-5 w-5 text-blue-600" />
+                            <h4 className="font-semibold text-blue-900">Week {module.week} Schedule</h4>
+                          </div>
+                          {classData?.schedule?.days && classData?.schedule?.time && (
+                            <Badge variant="outline" className="bg-white">
+                              {classData.schedule.days.join(', ')} at {classData.schedule.time}
+                            </Badge>
+                          )}
+                        </div>
+                        
+                        {scheduleData ? (
+                          <>
+                            {scheduleData.title && (
+                              <div className="mb-3">
+                                <p className="text-sm font-semibold text-blue-900">{scheduleData.title}</p>
+                              </div>
+                            )}
+                            {scheduleData.objectives && scheduleData.objectives.length > 0 && (
+                              <div className="mb-3">
+                                <p className="text-xs font-semibold text-blue-800 uppercase mb-2">Learning Objectives:</p>
+                                <ul className="space-y-1">
+                                  {scheduleData.objectives.map((obj: string, idx: number) => (
+                                    <li key={idx} className="text-sm text-blue-900 flex items-start">
+                                      <span className="mr-2">•</span>
+                                      <span>{obj}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {scheduleData.activities && scheduleData.activities.length > 0 && (
+                              <div className="mb-3">
+                                <p className="text-xs font-semibold text-blue-800 uppercase mb-2">Activities:</p>
+                                <ul className="space-y-1">
+                                  {scheduleData.activities.map((activity: string, idx: number) => (
+                                    <li key={idx} className="text-sm text-blue-900 flex items-start">
+                                      <span className="mr-2">•</span>
+                                      <span>{activity}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            <p className="text-xs text-blue-700 mt-3 italic">
+                              {module.lessons.length === 0 
+                                ? 'Students currently see this schedule. Create and publish a lesson to replace it with custom content.'
+                                : 'This is the original schedule. Your published lesson content is shown to students.'}
+                            </p>
+                          </>
+                        ) : (
+                          <div className="text-sm text-blue-800">
+                            <p className="mb-2">No predefined schedule for this week.</p>
+                            <p className="text-xs text-blue-700">Create a lesson below to add content for students to see.</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {module.lessons.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
                       <FileText className="h-12 w-12 mx-auto mb-3 text-gray-400" />
-                      <p className="text-sm mb-1">No lessons created for this week yet</p>
+                      <p className="text-sm mb-1">No lesson content has been created for this week</p>
                       <p className="text-xs text-gray-400 mb-4">
                         {classData?.schedule?.weeklyLessons?.find((s: any) => s.week === module.week) 
-                          ? 'You can create from scratch or use the class schedule template'
+                          ? '💡 Tip: Use the schedule template to quickly create a published lesson'
                           : 'Create your first lesson for this week'}
                       </p>
                       <div className="flex gap-2 justify-center">
                         {classData?.schedule?.weeklyLessons?.find((s: any) => s.week === module.week) && (
                           <Button 
                             variant="default" 
-                            className="bg-gradient-to-r from-primary to-blue-600"
+                            className="bg-gradient-to-r from-primary to-blue-600 transition-all duration-150 active:scale-95 hover:shadow-lg active:shadow-sm"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleCreateFromSchedule(module.week);
                             }}
                           >
                             <FileText className="h-4 w-4 mr-2" />
-                            Use Schedule Template
+                            Create & Publish from Schedule
                           </Button>
                         )}
                         <Button 
                           variant="outline" 
+                          className="transition-all duration-150 active:scale-95 hover:shadow-lg active:shadow-sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setFormData({ ...formData, week: module.week });
+                            setFormData({ ...formData, weekNumber: module.week });
                             handleCreateLesson();
                           }}
                         >
@@ -678,14 +764,14 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
                           <div className="flex-1">
                             <div className="flex items-center gap-3">
                               <h4 className="font-semibold text-gray-900">{lesson.title}</h4>
-                              {lesson.published ? (
+                              {lesson.isPublished ? (
                                 <Badge className="bg-green-100 text-green-700">Published</Badge>
                               ) : (
                                 <Badge variant="secondary">Draft</Badge>
                               )}
                             </div>
                             <p className="text-sm text-gray-600 mt-1 line-clamp-2">
-                              {lesson.content.replace(/<[^>]*>/g, '').substring(0, 100)}...
+                              {lesson.description?.substring(0, 100) || 'No description'}...
                             </p>
                           </div>
                           <div className="flex items-center gap-2 ml-4">
@@ -693,13 +779,20 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
                               variant="outline"
                               size="sm"
                               onClick={() => handleTogglePublish(lesson)}
+                              disabled={publishingLesson === lesson.id}
+                              className="transition-all duration-150 active:scale-95"
                             >
-                              {lesson.published ? 'Unpublish' : 'Publish'}
+                              {publishingLesson === lesson.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                lesson.isPublished ? 'Unpublish' : 'Publish'
+                              )}
                             </Button>
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => handleEditLesson(lesson)}
+                              className="transition-all duration-150 active:scale-95 hover:shadow-md active:shadow-sm"
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
@@ -707,9 +800,14 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
                               variant="outline"
                               size="sm"
                               onClick={() => handleDeleteLesson(lesson.id)}
-                              className="text-red-600 hover:text-red-700 hover:border-red-300"
+                              disabled={deletingLesson === lesson.id}
+                              className="text-red-600 hover:text-red-700 hover:border-red-300 transition-all duration-150 active:scale-95 hover:shadow-md active:shadow-sm"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              {deletingLesson === lesson.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
                             </Button>
                           </div>
                         </div>
@@ -732,61 +830,107 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
               </CardContent>
             </Card>
           ) : (
-            pendingApprovals.map((approval) => (
-              <Card key={approval.id}>
+            <div className="space-y-6">
+              {/* Summary Header */}
+              <Card className="border-l-4 border-l-purple-500 bg-gradient-to-r from-purple-50 to-white">
                 <CardContent className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                          <Users className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-gray-900">
-                            {approval.student.user.firstName} {approval.student.user.lastName}
-                          </h4>
-                          <p className="text-sm text-gray-600">{approval.student.user.email}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-500 mb-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <AlertCircle className="h-4 w-4 text-blue-600" />
-                          <span className="font-semibold text-blue-900">Week {approval.weekNumber} Completion Request</span>
-                        </div>
-                        <p className="text-sm text-blue-800">
-                          Completed on: {new Date(approval.completedAt).toLocaleString()}
-                        </p>
-                        {approval.submissionNotes && (
-                          <div className="mt-2 pt-2 border-t border-blue-200">
-                            <p className="text-sm font-medium text-blue-900 mb-1">Student Notes:</p>
-                            <p className="text-sm text-blue-800">{approval.submissionNotes}</p>
-                          </div>
-                        )}
-                      </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-1">Pending Weekly Completions</h3>
+                      <p className="text-sm text-gray-600">
+                        {pendingApprovals.length} student{pendingApprovals.length !== 1 ? 's' : ''} waiting for your review
+                      </p>
                     </div>
-                    
-                    <div className="flex gap-2 ml-4">
-                      <Button
-                        onClick={() => handleApproveWeek(approval.id)}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <CheckCircle2 className="h-4 w-4 mr-2" />
-                        Approve
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => handleRejectWeek(approval.id)}
-                        className="text-red-600 border-red-300 hover:bg-red-50"
-                      >
-                        <X className="h-4 w-4 mr-2" />
-                        Reject
-                      </Button>
+                    <div className="text-right">
+                      <div className="text-3xl font-bold text-purple-600">{pendingApprovals.length}</div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide">To Review</div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            ))
+
+              {/* Approvals List */}
+              {pendingApprovals.map((approval) => (
+                <Card key={approval.id} className="hover:shadow-lg transition-shadow duration-200 border-l-4 border-l-purple-500">
+                  <CardContent className="p-6">
+                    <div className="flex items-start justify-between gap-6">
+                      <div className="flex-1 space-y-4">
+                        {/* Student Info Header */}
+                        <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                          <div className="flex items-center gap-3">
+                            <div className="h-12 w-12 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-md">
+                              <span className="text-white font-semibold text-lg">
+                                {approval.student.user.firstName[0]}{approval.student.user.lastName[0]}
+                              </span>
+                            </div>
+                            <div>
+                              <h4 className="font-semibold text-gray-900 text-lg">
+                                {approval.student.user.firstName} {approval.student.user.lastName}
+                              </h4>
+                              <p className="text-sm text-gray-600">{approval.student.user.email}</p>
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300">
+                            Week {approval.weekNumber}
+                          </Badge>
+                        </div>
+                        
+                        {/* Completion Details */}
+                        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-4 rounded-lg border border-purple-200">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <CheckCircle2 className="h-5 w-5 text-purple-600" />
+                                <span className="font-semibold text-gray-900 text-base">Week {approval.weekNumber} Completion Request</span>
+                              </div>
+                              <div className="flex items-center gap-1 text-sm text-gray-700">
+                                <Clock className="h-4 w-4 text-gray-500" />
+                                <span>Submitted: {new Date(approval.completedAt).toLocaleString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric', 
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}</span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Student Notes */}
+                          {approval.submissionNotes && (
+                            <div className="mt-3 pt-3 border-t border-purple-200">
+                              <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Student Notes:</p>
+                              <div className="bg-white p-3 rounded border border-purple-100">
+                                <p className="text-sm text-gray-800 whitespace-pre-wrap">{approval.submissionNotes}</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Action Buttons */}
+                      <div className="flex flex-col gap-3 pt-4">
+                        <Button
+                          onClick={() => handleApproveWeek(approval.id)}
+                          className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-md hover:shadow-lg transition-all"
+                        >
+                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                          Approve
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => handleRejectWeek(approval.id)}
+                          className="text-red-600 border-red-300 hover:bg-red-50 hover:border-red-400 transition-all"
+                        >
+                          <X className="h-4 w-4 mr-2" />
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           )}
         </TabsContent>
       </Tabs>
@@ -806,8 +950,8 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
               <div>
                 <label className="text-sm font-medium mb-2 block">Week</label>
                 <Select 
-                  value={formData.week.toString()} 
-                  onValueChange={(v) => setFormData({ ...formData, week: parseInt(v) })}
+                  value={formData.weekNumber.toString()} 
+                  onValueChange={(v) => setFormData({ ...formData, weekNumber: parseInt(v) })}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -824,9 +968,9 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
                 <label className="text-sm font-medium mb-2 block">Order</label>
                 <Input
                   type="number"
-                  value={formData.order}
-                  onChange={(e) => setFormData({ ...formData, order: parseInt(e.target.value) })}
-                  min={1}
+                  value={formData.orderIndex}
+                  onChange={(e) => setFormData({ ...formData, orderIndex: parseInt(e.target.value) })}
+                  min={0}
                 />
               </div>
             </div>
@@ -841,11 +985,11 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
             </div>
 
             <div>
-              <label className="text-sm font-medium mb-2 block">Content</label>
+              <label className="text-sm font-medium mb-2 block">Description</label>
               <Textarea
-                value={formData.content}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                placeholder="Enter lesson content (HTML supported)..."
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Enter lesson description..."
                 rows={10}
                 className="font-mono text-sm"
               />
@@ -862,9 +1006,19 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
                     variant="outline"
                     disabled={uploadingFile}
                     onClick={() => document.getElementById('file-upload')?.click()}
+                    className="transition-all duration-150 active:scale-95 hover:shadow-md active:shadow-sm"
                   >
-                    <Upload className="h-4 w-4 mr-2" />
-                    {uploadingFile ? 'Uploading...' : 'Upload File'}
+                    {uploadingFile ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-2" />
+                        Upload File
+                      </>
+                    )}
                   </Button>
                   <input
                     id="file-upload"
@@ -906,8 +1060,14 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
                             size="sm"
                             variant="ghost"
                             onClick={() => handleDeleteMaterial(material.id, editingLesson.id)}
+                            disabled={deletingMaterial === material.id}
+                            className="transition-all duration-150 active:scale-95"
                           >
-                            <Trash2 className="h-4 w-4 text-red-600" />
+                            {deletingMaterial === material.id ? (
+                              <Loader2 className="h-4 w-4 text-red-600 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4 text-red-600" />
+                            )}
                           </Button>
                         </div>
                       </div>
@@ -925,8 +1085,8 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
               <input
                 type="checkbox"
                 id="published"
-                checked={formData.published}
-                onChange={(e) => setFormData({ ...formData, published: e.target.checked })}
+                checked={formData.isPublished}
+                onChange={(e) => setFormData({ ...formData, isPublished: e.target.checked })}
                 className="rounded border-gray-300"
               />
               <label htmlFor="published" className="text-sm font-medium">
@@ -936,12 +1096,21 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)} disabled={savingLesson} className="transition-all duration-150 active:scale-95 hover:shadow-md active:shadow-sm">
               Cancel
             </Button>
-            <Button onClick={handleSaveLesson} className="bg-gradient-to-r from-church-gold to-yellow-600">
-              <Save className="h-4 w-4 mr-2" />
-              {editingLesson ? 'Update Lesson' : 'Create Lesson'}
+            <Button onClick={handleSaveLesson} disabled={savingLesson} className="bg-gradient-to-r from-church-gold to-yellow-600 transition-all duration-150 active:scale-95 hover:shadow-lg active:shadow-sm">
+              {savingLesson ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {editingLesson ? 'Updating...' : 'Creating...'}
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  {editingLesson ? 'Update Lesson' : 'Create Lesson'}
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

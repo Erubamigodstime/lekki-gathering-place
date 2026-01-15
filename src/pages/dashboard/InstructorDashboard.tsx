@@ -11,7 +11,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
 export default function InstructorDashboard() {
   const { user } = useAuth();
@@ -30,14 +30,39 @@ export default function InstructorDashboard() {
       try {
         setError(null);
         const token = localStorage.getItem('token');
+        
+        if (!token) {
+          console.error('No token found in localStorage');
+          setError('Authentication token not found. Please login again.');
+          setLoading(false);
+          return;
+        }
+        
         const headers = { Authorization: `Bearer ${token}` };
 
         console.log('Fetching instructor dashboard data...');
         console.log('Token:', token);
+        console.log('API URL:', API_URL);
 
         // Get instructor profile (includes classes)
-        const profileRes = await axios.get(`${API_URL}/instructors/profile`, { headers });
-        console.log('Instructor profile:', profileRes.data);
+        console.log('About to fetch instructor profile from:', `${API_URL}/instructors/profile`);
+        const profileRes = await axios.get(`${API_URL}/instructors/profile`, { 
+          headers,
+          timeout: 30000 // 30 second timeout
+        }).catch(err => {
+          console.error('ERROR fetching instructor profile:', err);
+          console.error('Error response:', err.response);
+          console.error('Error message:', err.message);
+          throw err;
+        });
+        
+        console.log('Instructor profile response status:', profileRes.status);
+        console.log('Instructor profile response:', profileRes.data);
+        
+        if (!profileRes.data || !profileRes.data.data) {
+          throw new Error('Invalid response structure from instructor profile API');
+        }
+        
         const instructorData = profileRes.data.data;
         const instructorId = instructorData.id;
         console.log('Instructor ID:', instructorId);
@@ -67,57 +92,81 @@ export default function InstructorDashboard() {
         setTotalStudents(studentCount);
 
         // Fetch pending attendance for all instructor's classes
-        const attendancePromises = uniqueClasses.map((cls: any) =>
-          axios.get(`${API_URL}/attendance/class/${cls.id}?status=PENDING`, { headers })
-        );
-        const attendanceResults = await Promise.all(attendancePromises);
-        const allPendingAttendance = attendanceResults.flatMap(res => res.data.data || []);
-        setPendingAttendance(allPendingAttendance);
+        if (uniqueClasses.length > 0) {
+          const attendancePromises = uniqueClasses.map((cls: any) =>
+            axios.get(`${API_URL}/attendance/class/${cls.id}?status=PENDING`, { headers })
+              .catch(err => {
+                console.warn(`Failed to fetch attendance for class ${cls.id}:`, err.message);
+                return { data: { data: [] } };
+              })
+          );
+          const attendanceResults = await Promise.all(attendancePromises);
+          const allPendingAttendance = attendanceResults.flatMap(res => res.data.data || []);
+          setPendingAttendance(allPendingAttendance);
+        } else {
+          setPendingAttendance([]);
+        }
 
         // Fetch pending enrollments for all instructor's classes
-        console.log('Fetching pending enrollments for classes:', uniqueClasses.map(c => ({ id: c.id, name: c.name })));
-        const enrollmentPromises = uniqueClasses.map((cls: any) => {
-          console.log(`Fetching enrollments for class ${cls.name} (${cls.id})`);
-          return axios.get(`${API_URL}/enrollments/class/${cls.id}?status=PENDING`, { headers });
-        });
-        const enrollmentResults = await Promise.all(enrollmentPromises);
-        console.log('Enrollment results:', enrollmentResults.map(r => ({ 
-          status: r.status, 
-          dataLength: r.data.data?.length || 0,
-          fullData: r.data,
-          dataStructure: r.data.data ? 'has data.data' : 'no data.data',
-          dataType: Array.isArray(r.data.data) ? 'array' : typeof r.data.data
-        })));
-        const allPendingEnrollments = enrollmentResults.flatMap(res => {
-          // Handle different response structures
-          if (Array.isArray(res.data.data)) {
-            return res.data.data;
-          } else if (Array.isArray(res.data)) {
-            return res.data;
-          }
-          return [];
-        });
-        console.log('Pending enrollments fetched:', allPendingEnrollments.length);
-        console.log('Pending enrollments detail:', allPendingEnrollments.map(e => ({
-          id: e.id,
-          studentName: e.student?.user?.firstName,
-          className: e.class?.name,
-          status: e.status
-        })));
-        setPendingEnrollments(allPendingEnrollments);
+        if (uniqueClasses.length > 0) {
+          console.log('Fetching pending enrollments for classes:', uniqueClasses.map(c => ({ id: c.id, name: c.name })));
+          const enrollmentPromises = uniqueClasses.map((cls: any) => {
+            console.log(`Fetching enrollments for class ${cls.name} (${cls.id})`);
+            return axios.get(`${API_URL}/enrollments/class/${cls.id}?status=PENDING`, { headers })
+              .catch(err => {
+                console.warn(`Failed to fetch enrollments for class ${cls.id}:`, err.message);
+                return { data: { data: [] } };
+              });
+          });
+          const enrollmentResults = await Promise.all(enrollmentPromises);
+          console.log('Enrollment results:', enrollmentResults.map(r => ({ 
+            status: r.status, 
+            dataLength: r.data.data?.length || 0,
+            fullData: r.data,
+            dataStructure: r.data.data ? 'has data.data' : 'no data.data',
+            dataType: Array.isArray(r.data.data) ? 'array' : typeof r.data.data
+          })));
+          const allPendingEnrollments = enrollmentResults.flatMap(res => {
+            // Handle different response structures
+            if (Array.isArray(res.data.data)) {
+              return res.data.data;
+            } else if (Array.isArray(res.data)) {
+              return res.data;
+            }
+            return [];
+          });
+          console.log('Pending enrollments fetched:', allPendingEnrollments.length);
+          console.log('Pending enrollments detail:', allPendingEnrollments.map(e => ({
+            id: e.id,
+            studentName: e.student?.user?.firstName,
+            className: e.class?.name,
+            status: e.status
+          })));
+          setPendingEnrollments(allPendingEnrollments);
+        } else {
+          setPendingEnrollments([]);
+        }
 
         // Fetch recent activities (attendance + enrollments)
+        console.log('Fetching recent activities...');
         await fetchRecentActivities(uniqueClasses, headers);
+        console.log('Recent activities fetched successfully');
       } catch (error) {
         console.error('Failed to fetch instructor data:', error);
         if (axios.isAxiosError(error)) {
           console.error('Error details:', error.response?.data);
           console.error('Error status:', error.response?.status);
-          setError(error.response?.data?.message || 'Failed to load dashboard data');
+          
+          if (error.code === 'ECONNABORTED') {
+            setError('The server is taking longer than expected to respond. It may be waking up from sleep. Please wait a moment and try refreshing the page.');
+          } else {
+            setError(error.response?.data?.message || 'Failed to load dashboard data. Please try again.');
+          }
         } else {
           setError('An unexpected error occurred');
         }
       } finally {
+        console.log('Setting loading to false');
         setLoading(false);
       }
     };
@@ -127,30 +176,52 @@ export default function InstructorDashboard() {
 
   const fetchRecentActivities = async (classes: any[], headers: any) => {
     try {
+      console.log('fetchRecentActivities called with', classes.length, 'classes');
+      if (classes.length === 0) {
+        console.log('No classes, setting empty recent activities');
+        setRecentActivities([]);
+        return;
+      }
+
       const classIds = classes.map(c => c.id);
+      console.log('Fetching attendance for classIds:', classIds);
       
       // Fetch all attendance records (not just pending)
       const attendancePromises = classIds.map(classId =>
         axios.get(`${API_URL}/attendance`, {
           headers,
-          params: { classId }
-        }).catch(() => ({ data: { data: [] } }))
+          params: { classId },
+          timeout: 10000 // 10 second timeout
+        }).catch(err => {
+          console.warn(`Failed to fetch attendance for class ${classId}:`, err.message);
+          return { data: { data: [] } };
+        })
       );
       
+      console.log('Fetching enrollments for classIds:', classIds);
       // Fetch all enrollment records
       const enrollmentPromises = classIds.map(classId =>
-        axios.get(`${API_URL}/enrollments/class/${classId}`, { headers })
-          .catch(() => ({ data: { data: [] } }))
+        axios.get(`${API_URL}/enrollments/class/${classId}`, { 
+          headers,
+          timeout: 10000 // 10 second timeout
+        })
+          .catch(err => {
+            console.warn(`Failed to fetch enrollments for class ${classId}:`, err.message);
+            return { data: { data: [] } };
+          })
       );
 
+      console.log('Waiting for all promises to resolve...');
       const [attendanceResults, enrollmentResults] = await Promise.all([
         Promise.all(attendancePromises),
         Promise.all(enrollmentPromises)
       ]);
+      console.log('All promises resolved. Attendance results:', attendanceResults.length, 'Enrollment results:', enrollmentResults.length);
 
       // Combine and format activities
       const attendanceActivities = attendanceResults
         .flatMap(res => res.data.data || [])
+        .filter((attendance: any) => attendance.student?.user && attendance.class)
         .map((attendance: any) => ({
           id: `att-${attendance.id}`,
           user: { 
@@ -169,6 +240,7 @@ export default function InstructorDashboard() {
 
       const enrollmentActivities = enrollmentResults
         .flatMap(res => res.data.data || [])
+        .filter((enrollment: any) => enrollment.student?.user && enrollment.class)
         .map((enrollment: any) => ({
           id: `enr-${enrollment.id}`,
           user: { 
@@ -185,6 +257,8 @@ export default function InstructorDashboard() {
           status: enrollment.status
         }));
 
+      console.log('Processing activities - attendance:', attendanceActivities.length, 'enrollment:', enrollmentActivities.length);
+
       // Combine, sort by time, and take the 2 most recent
       const allActivities = [...attendanceActivities, ...enrollmentActivities]
         .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
@@ -194,6 +268,7 @@ export default function InstructorDashboard() {
           time: getRelativeTime(activity.time)
         }));
 
+      console.log('Setting recent activities:', allActivities.length);
       setRecentActivities(allActivities);
     } catch (error) {
       console.error('Failed to fetch recent activities:', error);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle2, Circle, ChevronDown, ChevronRight, FileText, ClipboardList, Clock, CheckCheck, Loader, File, FileVideo, Link as LinkIcon, Download } from 'lucide-react';
+import { CheckCircle2, Circle, ChevronDown, ChevronRight, FileText, ClipboardList, Clock, CheckCheck, Loader, File, FileVideo, Link as LinkIcon, Download, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -59,6 +59,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set([1]));
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
+  const [classSchedule, setClassSchedule] = useState<any>(null);
 
   useEffect(() => {
     fetchModules();
@@ -76,6 +77,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
       const classData = classResponse.data.data;
       const schedule = classData.schedule?.weeklyLessons || [];
       const totalWeeks = classData.totalWeeks || 12; // Default to 12 weeks if not set
+      setClassSchedule(classData.schedule);
 
       console.log('Class schedule data:', {
         totalWeeks,
@@ -477,6 +479,32 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
           <p className="text-gray-600 text-lg">
             Complete each week's lessons and assignments to progress through the course
           </p>
+          
+          {/* Class Schedule Info */}
+          {classSchedule && (classSchedule.days || classSchedule.time) && (
+            <div className="mt-4 p-4 bg-white border border-blue-200 rounded-lg shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <Calendar className="h-5 w-5 text-blue-600" />
+                <h3 className="font-semibold text-gray-900">Class Schedule</h3>
+              </div>
+              <div className="flex gap-4 text-sm text-gray-700">
+                {classSchedule.days && classSchedule.days.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="bg-blue-50 border-blue-300">
+                      {classSchedule.days.join(', ')}
+                    </Badge>
+                  </div>
+                )}
+                {classSchedule.time && (
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-gray-500" />
+                    <span>{classSchedule.time}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
           <div className="mt-4 flex gap-4 text-sm">
             <div className="flex items-center gap-2">
               <Circle className="h-4 w-4 text-gray-400" />

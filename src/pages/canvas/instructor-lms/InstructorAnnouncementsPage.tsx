@@ -33,6 +33,7 @@ interface InstructorAnnouncementsPageProps {
 
 export default function InstructorAnnouncementsPage({ classId }: InstructorAnnouncementsPageProps) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
@@ -41,11 +42,26 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
     title: '',
     content: '',
     priority: 'normal' as 'low' | 'normal' | 'high' | 'urgent',
+    targetClassId: classId, // Allow selecting different class
   });
 
   useEffect(() => {
+    fetchClasses();
     fetchAnnouncements();
   }, [classId]);
+
+  const fetchClasses = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_URL}/instructors/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const instructorClasses = response.data.data?.classes || [];
+      setClasses(instructorClasses);
+    } catch (error) {
+      console.error('Failed to fetch classes:', error);
+    }
+  };
 
   const fetchAnnouncements = async () => {
     try {
@@ -63,7 +79,12 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
 
   const handleCreate = () => {
     setEditingAnnouncement(null);
-    setFormData({ title: '', content: '', priority: 'normal' });
+    setFormData({ 
+      title: '', 
+      content: '', 
+      priority: 'normal',
+      targetClassId: classId // Default to current class
+    });
     setShowCreateDialog(true);
   };
 
@@ -71,27 +92,53 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
     try {
       const token = localStorage.getItem('token');
       
+      // Convert priority to uppercase to match database enum
+      const payload = {
+        title: formData.title,
+        content: formData.content,
+        priority: formData.priority.toUpperCase(),
+        classId: formData.targetClassId, // Use selected class
+      };
+
+      console.log('Creating announcement with payload:', payload);
+      console.log('Announcement will be sent to classId:', payload.classId);
+      
       if (editingAnnouncement) {
+        // When editing, don't change the class
+        const editPayload = {
+          title: formData.title,
+          content: formData.content,
+          priority: formData.priority.toUpperCase(),
+        };
         await axios.put(
           `${API_URL}/announcements/${editingAnnouncement.id}`,
-          formData,
+          editPayload,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         toast.success('Announcement updated!');
       } else {
-        await axios.post(
+        const response = await axios.post(
           `${API_URL}/announcements`,
-          { ...formData, classId },
+          payload,
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        toast.success('Announcement posted!');
+        console.log('Announcement created:', response.data);
+        const selectedClass = classes.find(c => c.id === formData.targetClassId);
+        toast.success(`Announcement posted to all students in ${selectedClass?.name || 'the class'}!`);
       }
       
       setShowCreateDialog(false);
       fetchAnnouncements();
     } catch (error) {
       console.error('Failed to save announcement:', error);
-      toast.error('Failed to save announcement');
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
+        const message = error.response?.data?.message || 'Failed to create announcement';
+        toast.error(message);
+      } else {
+        toast.error('Failed to save announcement');
+      }
     }
   };
 
@@ -136,7 +183,10 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
           <h1 className="text-3xl font-bold text-gray-900">Announcements</h1>
           <p className="text-gray-600 mt-1">Communicate important updates to your students</p>
         </div>
-        <Button onClick={handleCreate} className="bg-gradient-to-r from-church-gold to-yellow-600">
+        <Button 
+          onClick={handleCreate} 
+          className="bg-gradient-to-r from-church-gold to-yellow-600 transition-all duration-150 active:scale-95 hover:shadow-lg active:shadow-sm"
+        >
           <Plus className="h-4 w-4 mr-2" />
           New Announcement
         </Button>
@@ -149,7 +199,11 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
               <Megaphone className="h-16 w-16 text-gray-400 mb-4" />
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No Announcements Yet</h3>
               <p className="text-gray-600 mb-4">Start communicating with your students</p>
-              <Button onClick={handleCreate} variant="outline">
+              <Button 
+                onClick={handleCreate} 
+                variant="outline"
+                className="transition-all duration-150 active:scale-95 hover:shadow-md active:shadow-sm"
+              >
                 <Plus className="h-4 w-4 mr-2" />
                 Create First Announcement
               </Button>
@@ -191,6 +245,7 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
                         });
                         setShowCreateDialog(true);
                       }}
+                      className="transition-all duration-150 active:scale-90 hover:bg-slate-50 active:bg-slate-100"
                     >
                       <Edit className="h-4 w-4" />
                     </Button>
@@ -198,7 +253,7 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
                       variant="outline"
                       size="sm"
                       onClick={() => handleDelete(announcement.id)}
-                      className="text-red-600 hover:text-red-700"
+                      className="text-red-600 hover:text-red-700 transition-all duration-150 active:scale-90 hover:bg-red-50 active:bg-red-100"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -217,7 +272,7 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
 
       {/* Create/Edit Dialog */}
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
               {editingAnnouncement ? 'Edit Announcement' : 'New Announcement'}
@@ -227,7 +282,38 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 overflow-y-auto flex-1 px-1">
+            {/* Class Selector - Only show when creating new announcement and instructor has multiple classes */}
+            {!editingAnnouncement && classes.length > 1 && (
+              <div>
+                <label className="text-sm font-medium mb-2 block">
+                  Select Class <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={formData.targetClassId}
+                  onChange={(e) => setFormData({ ...formData, targetClassId: e.target.value })}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-church-gold focus:border-transparent"
+                >
+                  {classes.map((cls) => (
+                    <option key={cls.id} value={cls.id}>
+                      {cls.name} ({cls._count?.enrollments || 0} students)
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  This announcement will be visible to all approved students in the selected class
+                </p>
+              </div>
+            )}
+            
+            {!editingAnnouncement && classes.length === 1 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                <p className="text-sm text-blue-800">
+                  <strong>Sending to:</strong> {classes[0]?.name} ({classes[0]?._count?.enrollments || 0} students)
+                </p>
+              </div>
+            )}
+
             <div>
               <label className="text-sm font-medium mb-2 block">Title</label>
               <Input
@@ -263,10 +349,17 @@ export default function InstructorAnnouncementsPage({ classId }: InstructorAnnou
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowCreateDialog(false)}
+              className="transition-all duration-150 active:scale-95 hover:bg-slate-50 active:bg-slate-100"
+            >
               Cancel
             </Button>
-            <Button onClick={handleSave} className="bg-gradient-to-r from-church-gold to-yellow-600">
+            <Button 
+              onClick={handleSave} 
+              className="bg-gradient-to-r from-church-gold to-yellow-600 transition-all duration-150 active:scale-95 hover:shadow-lg active:shadow-sm"
+            >
               <Send className="h-4 w-4 mr-2" />
               {editingAnnouncement ? 'Update' : 'Post'} Announcement
             </Button>

@@ -14,7 +14,10 @@ import {
   Upload,
   Save,
   X,
-  AlertCircle
+  AlertCircle,
+  Calendar,
+  Trophy,
+  ExternalLink
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -69,6 +72,7 @@ interface Submission {
   id: string;
   status: string;
   submittedAt: string;
+  attemptNumber?: number;
   content?: string;
   fileUrl?: string;
   student: {
@@ -82,6 +86,7 @@ interface Submission {
     id: string;
     title: string;
     maxPoints: number;
+    dueDate?: string | null;
   };
   grade?: {
     points: number;
@@ -150,7 +155,8 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
   const fetchAssignments = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/assignments/class/${classId}`, {
+      // Include unpublished assignments for instructors
+      const response = await axios.get(`${API_URL}/assignments/class/${classId}?includeUnpublished=true`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setAssignments(response.data.data || []);
@@ -164,13 +170,21 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
   const fetchPendingSubmissions = async () => {
     try {
       const token = localStorage.getItem('token');
+      console.log('Fetching pending submissions for classId:', classId);
+      console.log('API URL:', `${API_URL}/submissions/class/${classId}?status=SUBMITTED`);
       // Fetch all assignments and their pending submissions
       const response = await axios.get(`${API_URL}/submissions/class/${classId}?status=SUBMITTED`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      console.log('Pending submissions response:', response.data);
+      console.log('Number of pending submissions:', response.data.data?.length || 0);
       setPendingSubmissions(response.data.data || []);
     } catch (error) {
       console.error('Failed to fetch pending submissions:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
+      }
     }
   };
 
@@ -552,79 +566,146 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
               </CardContent>
             </Card>
           ) : (
-            pendingSubmissions.map((submission) => (
-              <Card key={submission.id}>
+            <div className="space-y-6">
+              {/* Summary Header */}
+              <Card className="border-l-4 border-l-amber-500 bg-gradient-to-r from-amber-50 to-white">
                 <CardContent className="p-6">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                          <Users className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-gray-900">
-                            {submission.student.user.firstName} {submission.student.user.lastName}
-                          </h4>
-                          <p className="text-sm text-gray-600">{submission.student.user.email}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-500 mb-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <AlertCircle className="h-4 w-4 text-blue-600" />
-                          <span className="font-semibold text-blue-900">{submission.assignment.title}</span>
-                          <Badge className="bg-amber-100 text-amber-700">
-                            {submission.assignment.maxPoints} points
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-blue-800">
-                          Submitted: {new Date(submission.submittedAt).toLocaleString()}
-                        </p>
-                        
-                        {submission.content && (
-                          <div className="mt-3 pt-3 border-t border-blue-200">
-                            <p className="text-sm font-medium text-blue-900 mb-1">Submission:</p>
-                            <p className="text-sm text-blue-800 whitespace-pre-wrap">{submission.content}</p>
-                          </div>
-                        )}
-                        
-                        {submission.fileUrl && (
-                          <div className="mt-3 pt-3 border-t border-blue-200">
-                            <p className="text-sm font-medium text-blue-900 mb-1">File:</p>
-                            <a 
-                              href={submission.fileUrl} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-sm text-blue-600 hover:underline"
-                            >
-                              View Submission File
-                            </a>
-                          </div>
-                        )}
-                      </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-1">Pending Submissions</h3>
+                      <p className="text-sm text-gray-600">
+                        {pendingSubmissions.length} submission{pendingSubmissions.length !== 1 ? 's' : ''} waiting for your review
+                      </p>
                     </div>
-                    
-                    <div className="flex gap-2 ml-4">
-                      <Button
-                        onClick={() => handleGradeSubmission(submission)}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <CheckCircle2 className="h-4 w-4 mr-2" />
-                        Grade
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => handleRejectSubmission(submission.id)}
-                        className="text-red-600 border-red-300 hover:bg-red-50"
-                      >
-                        <X className="h-4 w-4 mr-2" />
-                        Reject
-                      </Button>
+                    <div className="text-right">
+                      <div className="text-3xl font-bold text-amber-600">{pendingSubmissions.length}</div>
+                      <div className="text-xs text-gray-500 uppercase tracking-wide">To Review</div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            ))
+
+              {/* Submissions List */}
+              <div className="space-y-4">
+                {pendingSubmissions.map((submission, index) => (
+                  <Card key={submission.id} className="hover:shadow-lg transition-shadow duration-200 border-l-4 border-l-blue-500">
+                    <CardContent className="p-6">
+                      <div className="flex items-start justify-between gap-6">
+                        <div className="flex-1 space-y-4">
+                          {/* Student Info Header */}
+                          <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                            <div className="flex items-center gap-3">
+                              <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
+                                <span className="text-white font-semibold text-lg">
+                                  {submission.student.user.firstName[0]}{submission.student.user.lastName[0]}
+                                </span>
+                              </div>
+                              <div>
+                                <h4 className="font-semibold text-gray-900 text-lg">
+                                  {submission.student.user.firstName} {submission.student.user.lastName}
+                                </h4>
+                                <p className="text-sm text-gray-600">{submission.student.user.email}</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300">
+                                Attempt #{submission.attemptNumber || 1}
+                              </Badge>
+                            </div>
+                          </div>
+                          
+                          {/* Assignment Details */}
+                          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <FileText className="h-5 w-5 text-blue-600" />
+                                  <span className="font-semibold text-gray-900 text-base">{submission.assignment.title}</span>
+                                </div>
+                                <div className="flex items-center gap-4 text-sm text-gray-700">
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="h-4 w-4 text-gray-500" />
+                                    <span>Submitted: {new Date(submission.submittedAt).toLocaleString('en-US', { 
+                                      month: 'short', 
+                                      day: 'numeric', 
+                                      year: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}</span>
+                                  </div>
+                                  {submission.assignment.dueDate && (
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="h-4 w-4 text-gray-500" />
+                                      <span>Due: {new Date(submission.assignment.dueDate).toLocaleDateString('en-US', { 
+                                        month: 'short', 
+                                        day: 'numeric', 
+                                        year: 'numeric'
+                                      })}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="inline-flex items-center gap-1 bg-blue-100 text-blue-900 px-3 py-1 rounded-full font-semibold">
+                                  <Trophy className="h-4 w-4" />
+                                  <span>{submission.assignment.maxPoints} pts</span>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Submission Content */}
+                            {submission.content && (
+                              <div className="mt-3 pt-3 border-t border-blue-200">
+                                <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Submission Text:</p>
+                                <div className="bg-white p-3 rounded border border-blue-100 max-h-32 overflow-y-auto">
+                                  <p className="text-sm text-gray-800 whitespace-pre-wrap">{submission.content}</p>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* File Attachment */}
+                            {submission.fileUrl && (
+                              <div className="mt-3 pt-3 border-t border-blue-200">
+                                <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Attached File:</p>
+                                <a 
+                                  href={submission.fileUrl} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium bg-white px-3 py-2 rounded border border-blue-200 hover:border-blue-400 transition-colors"
+                                >
+                                  <FileText className="h-4 w-4" />
+                                  View Submission File
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Action Buttons */}
+                        <div className="flex flex-col gap-3 pt-4">
+                          <Button
+                            onClick={() => handleGradeSubmission(submission)}
+                            className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-md hover:shadow-lg transition-all"
+                          >
+                            <CheckCircle2 className="h-4 w-4 mr-2" />
+                            Grade Now
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => handleRejectSubmission(submission.id)}
+                            className="text-red-600 border-red-300 hover:bg-red-50 hover:border-red-400 transition-all"
+                          >
+                            <X className="h-4 w-4 mr-2" />
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
           )}
         </TabsContent>
       </Tabs>
