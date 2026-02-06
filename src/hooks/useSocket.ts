@@ -12,6 +12,8 @@ interface UseSocketOptions {
   onTypingStop?: (data: { senderId: string }) => void;
   onUserStatus?: (data: { userId: string; isOnline: boolean }) => void;
   onConversationUpdate?: (conversation: any) => void;
+  onDeliveryReceipt?: (receipt: { messageId: string; status: 'delivered' | 'read'; timestamp: string }) => void;
+  onSyncResponse?: (syncData: any) => void;
 }
 
 export function useSocket(options: UseSocketOptions = {}) {
@@ -60,6 +62,9 @@ export function useSocket(options: UseSocketOptions = {}) {
         toast.success('Real-time messaging connected', { duration: 2000 });
         hasShownInitialToast.current = true;
       }
+
+      // ENTERPRISE: Signal connection ready to receive pending messages
+      socketRef.current?.emit('connection:ready');
     });
 
     socketRef.current.on('disconnect', (reason) => {
@@ -85,6 +90,10 @@ export function useSocket(options: UseSocketOptions = {}) {
     // Message events
     socketRef.current.on('message:new', (message) => {
       console.log('📨 New message received:', message);
+      
+      // ENTERPRISE: Send delivery acknowledgment immediately
+      socketRef.current?.emit('message:ack:delivered', { messageId: message.id });
+      
       optionsRef.current.onNewMessage?.(message);
       
       // Show notification if not on the chat
@@ -94,6 +103,30 @@ export function useSocket(options: UseSocketOptions = {}) {
           duration: 4000,
         });
       }
+    });
+
+    // ENTERPRISE: Handle delivery receipts (for sent messages)
+    socketRef.current.on('message:receipt', (receipt) => {
+      console.log('📬 Delivery receipt:', receipt);
+      optionsRef.current.onDeliveryReceipt?.(receipt);
+    });
+
+    // ENTERPRISE: Handle sync response (reconnection recovery)
+    socketRef.current.on('sync:response', (syncData) => {
+      console.log('🔄 Sync response:', syncData);
+      optionsRef.current.onSyncResponse?.(syncData);
+      
+      if (syncData.hasGap) {
+        toast.warning('Some messages may have been missed during disconnection', {
+          description: 'Gaps detected in message sequence',
+          duration: 5000,
+        });
+      }
+    });
+
+    socketRef.current.on('sync:error', (error) => {
+      console.error('Sync error:', error);
+      toast.error('Failed to sync messages');
     });
 
     socketRef.current.on('message:read', (data) => {
@@ -149,6 +182,16 @@ export function useSocket(options: UseSocketOptions = {}) {
     emit('message:read', { messageId, senderId });
   }, [emit]);
 
+  // ENTERPRISE: Request sync for missed messages
+  const requestSync = useCallback((partnerId: string, lastSequence: number) => {
+    emit('sync:request', { partnerId, lastSequence });
+  }, [emit]);
+
+  // ENTERPRISE: Send delivery ACK (called automatically by onNewMessage)
+  const sendDeliveryAck = useCallback((messageId: string) => {
+    emit('message:ack:delivered', { messageId });
+  }, [emit]);
+
   useEffect(() => {
     connect();
 
@@ -175,6 +218,8 @@ export function useSocket(options: UseSocketOptions = {}) {
     emitTypingStart,
     emitTypingStop,
     emitMessageRead,
+    requestSync,
+    sendDeliveryAck,
     connect,
     disconnect,
   };

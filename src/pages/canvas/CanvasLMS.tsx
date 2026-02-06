@@ -24,7 +24,7 @@ import InboxPage from './lms/InboxPage';
 import PeoplePage from './lms/PeoplePage';
 import HistoryPage from './lms/HistoryPage';
 import CertificatesPage from './lms/CertificatesPage';
-import GradesPage from './lms/GradesPage';
+import StudentGradebookPage from './student-lms/StudentGradebookPage';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
@@ -104,7 +104,7 @@ export default function CanvasLMS() {
       case 'certificates':
         return <CertificatesPage classId={classId} />;
       case 'grades':
-        return <GradesPage classId={classId} />;
+        return <StudentGradebookPage classId={classId} />;
       default:
         return <ModulesPage classId={classId} />;
     }
@@ -198,7 +198,7 @@ export default function CanvasLMS() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-hide">
           {lmsNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;

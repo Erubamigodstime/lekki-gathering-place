@@ -12,7 +12,7 @@ export function InstructorSpotlight() {
   const navigate = useNavigate()
 
   return (
-    <section className="py-5" aria-labelledby="instructors-heading">
+    <section className="py-5 bg-white/85"  aria-labelledby="instructors-heading">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="text-center mb-16 animate-fade-in-up">
           <h2 id="instructors-heading" className="text-4xl md:text-5xl font-bold text-primary mb-4">
@@ -37,12 +37,7 @@ export function InstructorSpotlight() {
                   className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                   priority={index < 3}
                 />
-                <div className="absolute bottom-4 left-4">
-                  <Badges className="bg-amber-500 text-white flex items-center gap-1" aria-label={`${instructor.rating} star rating`}>
-                    <Award className="w-3 h-3" aria-hidden="true" />
-                    {instructor.rating} Rating
-                  </Badges>
-                </div>
+
               </div>
 
               <div className="p-6">

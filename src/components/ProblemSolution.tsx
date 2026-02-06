@@ -20,10 +20,10 @@ export function ProblemSolution() {
   ]
 
   return (
-    <section className="">
+    <section className="bg-white/95">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="text-center mb-16 animate-fade-in-up">
-          <h2 className="text-4xl md:text-5xl font-bold text-blue-950 mb-4">
+          <h2 className="text-4xl md:text-5xl font-bold pt-6 text-blue-950 mb-4">
             From <span className="text-red-600">Chaos</span> to <span className="text-green-600">Clarity</span>
           </h2>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
@@ -31,7 +31,7 @@ export function ProblemSolution() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 pb-7 items-center">
           {/* Problems */}
           <div className="space-y-4 animate-fade-in-left">
             <h3 className="text-2xl font-bold text-slate-900 mb-6">Old Way</h3>
@@ -55,7 +55,7 @@ export function ProblemSolution() {
           </div>
 
           {/* Solutions */}
-          <div className="space-y-4 animate-fade-in-right">
+          <div className="space-y-4 animate-fade-in-right ">
             <h3 className="text-2xl font-bold text-slate-900 mb-6">New Way</h3>
             {solutions.map((solution, index) => (
               <div
@@ -66,7 +66,7 @@ export function ProblemSolution() {
                 <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0 mt-1">
                   <Check className="w-4 h-4 text-white" />
                 </div>
-                <p className="text-slate-700 font-medium">{solution}</p>
+                <p className="text-slate-700 font-medium ">{solution}</p>
               </div>
             ))}
           </div>

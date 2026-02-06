@@ -18,7 +18,7 @@ const attendanceData = [
 
 export function AnalyticsInsights() {
   return (
-    <section className="py-16">
+    <section className="py-16 bg-white/95">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="text-center mb-16 animate-fade-in-up">
           <h2 className="text-4xl md:text-5xl font-bold text-primary mb-4">

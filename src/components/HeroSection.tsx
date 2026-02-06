@@ -1,8 +1,14 @@
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { classes } from "@/data/classesData";
+
+interface Course {
+  id: string;
+  name: string;
+}
 
 
 
@@ -24,6 +30,10 @@ const stats = [
 
 const HeroSection = () => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
@@ -34,6 +44,32 @@ const HeroSection = () => {
 
     return () => clearInterval(interval);
   }, []);
+
+  // Load courses from local data
+  useEffect(() => {
+    const coursesList = classes.map(c => ({ id: c.id, name: c.className }));
+    setCourses(coursesList);
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredCourses = courses.filter(course =>
+    course.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleCourseClick = (courseId: string) => {
+    setShowDropdown(false);
+    navigate(`/class/${courseId}`);
+  };
 
   const handleDashboardClick = () => {
     if (isAuthenticated && user) {
@@ -62,62 +98,51 @@ const HeroSection = () => {
         <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
           {/* Left Content */}
           <div className="relative z-10 text-center lg:text-left">
+            <div>
             <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-primary-foreground leading-tight mb-4 sm:mb-6">
-              Develop Your Skills,{' '}
-              <span className="text-church-gold">Serve With Purpose</span>
+            Develop Your Skills,{' '}
+            <span className="text-church-gold">Serve With Purpose</span>
             </h1>
             <p className="text-primary-foreground/70 text-base sm:text-lg mb-6 sm:mb-8 max-w-xl mx-auto lg:mx-0">
               Join The Lekki Stake Gathering Place and discover your God-given talents. Learn practical skills that empower you to serve, become financially self reliant and contribute to your community
             </p>
 
+            </div>
+
+
             {/* Search Bar */}
-            <div className="relative mb-6 sm:mb-8 max-w-xl mx-auto lg:mx-0">
+            <div className="relative mb-6 sm:mb-8 max-w-xl mx-auto lg:mx-0" ref={dropdownRef}>
               <input
                 type="text"
                 placeholder="What do you want to learn?"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setShowDropdown(true)}
                 className="w-full py-3 sm:py-4 px-4 sm:px-6 pr-12 sm:pr-14 rounded-full bg-primary-foreground text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-accent text-sm sm:text-base"
               />
               <button className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 sm:w-10 sm:h-10 bg-accent rounded-full flex items-center justify-center hover:bg-gathering-yellow-hover transition-colors">
                 <Search className="w-5 h-5 text-accent-foreground" />
               </button>
+              
+              {/* Course Dropdown */}
+              {showDropdown && filteredCourses.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden z-50">
+                  {filteredCourses.map((course) => (
+                    <button
+                      key={course.id}
+                      onClick={() => handleCourseClick(course.id)}
+                      className="w-full px-4 sm:px-6 py-3 text-left text-foreground hover:bg-accent/10 transition-colors border-b border-gray-100 last:border-b-0 text-sm sm:text-base"
+                    >
+                      {course.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Desktop Stats */}
-            <div className="hidden lg:flex items-center gap-6 mb-8">
-              <div className="flex -space-x-3">
-                <img
-                  src="https://cdn.prod.website-files.com/6877615c9ceac92697b37112/687c785afe4d6ac8715a511e_Avatar%20Image%203.png"
-                  alt="Student"
-                  className="w-10 h-10 rounded-full border-2 border-primary"
-                />
-                <img
-                  src="https://cdn.prod.website-files.com/6877615c9ceac92697b37112/687c786d2a972f960df9942d_Avatar%20Image%202.png"
-                  alt="Student"
-                  className="w-10 h-10 rounded-full border-2 border-primary"
-                />
-                <img
-                  src="https://cdn.prod.website-files.com/6877615c9ceac92697b37112/687c786d667aa812a507ac29_Avatar%20Image%201.png"
-                  alt="Student"
-                  className="w-10 h-10 rounded-full border-2 border-primary"
-                />
-              </div>
-              <div>
-                <p className="text-primary-foreground font-semibold">A Goal of 100+ Student</p>
-                <div className="flex items-center gap-2">
-                  <div className="flex">
-                    {[...Array(5)].map((_, i) => (
-                      <svg key={i} className="w-4 h-4 text-accent" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                      </svg>
-                    ))}
-                  </div>
-                  <span className="text-primary-foreground/70 text-sm">4.9/5 Avg. Rating</span>
-                </div>
-              </div>
-            </div>
 
             {/* CTA Buttons */}
-            <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
+            <div className="flex flex-col md:mt-48 sm:flex-row items-center justify-center lg:justify-start gap-4">
               <Button 
                 onClick={handleRegisterClick}
                 className="rounded-full bg-accent text-accent-foreground hover:bg-gathering-yellow-hover px-6 sm:px-8 py-5 sm:py-6 text-sm sm:text-base font-semibold w-full sm:w-auto flex items-center justify-around sm:justify-center gap-2"

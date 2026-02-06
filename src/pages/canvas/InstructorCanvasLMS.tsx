@@ -23,7 +23,7 @@ import InstructorModulesPage from './instructor-lms/InstructorModulesPage';
 import InstructorInboxPage from './instructor-lms/InstructorInboxPage';
 import InstructorPeoplePage from './instructor-lms/InstructorPeoplePage';
 import InstructorAssignmentsPage from './instructor-lms/InstructorAssignmentsPage';
-import InstructorGradebookPage from './instructor-lms/InstructorGradebookPage';
+import InstructorGradebookTable from './instructor-lms/InstructorGradebookTable';
 import InstructorSettingsPage from './instructor-lms/InstructorSettingsPage';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
@@ -75,15 +75,15 @@ export default function InstructorCanvasLMS() {
     try {
       const token = localStorage.getItem('token');
       
-      // Fetch unread messages count
-      const messagesRes = await axios.get(`${API_URL}/messages/class/${classId}?unread=true`, {
+      // Fetch unread messages count - catch errors silently
+      const messagesRes = await axios.get(`${API_URL}/messages/class/${classId}`, {
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => ({ data: { data: [] } }));
       
       setUnreadMessages(messagesRes.data.data?.length || 0);
 
-      // Fetch pending approvals (module completions + assignment submissions)
-      const approvalsRes = await axios.get(`${API_URL}/week-progress?classId=${classId}&status=pending`, {
+      // Fetch pending approvals using correct endpoint
+      const approvalsRes = await axios.get(`${API_URL}/week-progress/pending?classId=${classId}`, {
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => ({ data: { data: [] } }));
       
@@ -118,7 +118,7 @@ export default function InstructorCanvasLMS() {
       case 'people':
         return <InstructorPeoplePage classId={classId} />;
       case 'gradebook':
-        return <InstructorGradebookPage classId={classId} />;
+        return <InstructorGradebookTable classId={classId} />;
       case 'settings':
         return <InstructorSettingsPage classId={classId} classData={classData} onUpdate={fetchClassData} />;
       default:
@@ -229,7 +229,7 @@ export default function InstructorCanvasLMS() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-hide">
           {lmsNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;

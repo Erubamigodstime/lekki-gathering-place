@@ -41,12 +41,21 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="text-slate-600 mb-6">
               We're sorry for the inconvenience. Please try refreshing the page.
             </p>
-            <Button
-              onClick={() => window.location.href = '/'}
-              className="bg-primary hover:bg-primary/90"
-            >
-              Go to Homepage
-            </Button>
+            <div className="flex gap-3 justify-center">
+              <Button
+                onClick={() => window.location.reload()}
+                variant="outline"
+                className="border-primary text-primary hover:bg-primary/10"
+              >
+                Refresh Page
+              </Button>
+              <Button
+                onClick={() => window.location.href = '/dashboard'}
+                className="bg-primary hover:bg-primary/90"
+              >
+                Go to Dashboard
+              </Button>
+            </div>
           </div>
         </div>
       );

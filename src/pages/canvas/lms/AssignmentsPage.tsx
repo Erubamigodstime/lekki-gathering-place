@@ -14,6 +14,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -44,7 +52,7 @@ interface Assignment {
   lesson?: {
     id: string;
     title: string;
-    week: number;
+    weekNumber: number;
   };
   submission?: {
     id: string;
@@ -75,6 +83,7 @@ export default function StudentAssignmentsPage({ classId }: StudentAssignmentsPa
     file: null as File | null,
   });
   const [uploading, setUploading] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'pending' | 'submitted'>('all');
 
   useEffect(() => {
     fetchAssignments();
@@ -82,12 +91,19 @@ export default function StudentAssignmentsPage({ classId }: StudentAssignmentsPa
 
   const fetchAssignments = async () => {
     try {
+      setLoading(true);
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_URL}/assignments/class/${classId}?includeSubmission=true`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       // Only show published assignments
       const publishedAssignments = (response.data.data || []).filter((a: Assignment) => a.isPublished);
+      console.log('Fetched assignments:', publishedAssignments.map((a: Assignment) => ({
+        id: a.id,
+        title: a.title,
+        hasSubmission: !!a.submission,
+        submissionStatus: a.submission?.status
+      })));
       setAssignments(publishedAssignments);
     } catch (error) {
       console.error('Failed to fetch assignments:', error);
@@ -134,7 +150,8 @@ export default function StudentAssignmentsPage({ classId }: StudentAssignmentsPa
             },
           }
         );
-        fileUrl = uploadResponse.data.data.url;
+        // Backend returns { success, message, url, publicId }
+        fileUrl = uploadResponse.data.url;
       }
 
       // Create or update submission
@@ -175,12 +192,18 @@ export default function StudentAssignmentsPage({ classId }: StudentAssignmentsPa
         );
       }
 
+      console.log('Assignment submitted successfully, fetching updated assignments...');
       toast.success('Assignment submitted successfully!');
       setShowSubmitDialog(false);
-      fetchAssignments();
-    } catch (error) {
+      
+      // Wait for assignments to refresh
+      await fetchAssignments();
+      console.log('Assignments refreshed after submission');
+    } catch (error: any) {
       console.error('Failed to submit assignment:', error);
-      toast.error('Failed to submit assignment');
+      console.error('Error response:', error.response?.data);
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to submit assignment';
+      toast.error(errorMessage);
     } finally {
       setUploading(false);
     }
@@ -270,6 +293,21 @@ export default function StudentAssignmentsPage({ classId }: StudentAssignmentsPa
     return assignment.submission.status === 'DRAFT' || assignment.submission.status === 'REJECTED';
   };
 
+  const filteredAssignments = assignments.filter(assignment => {
+    if (filter === 'all') return true;
+    if (filter === 'pending') {
+      return !assignment.submission || assignment.submission.status === 'DRAFT';
+    }
+    if (filter === 'submitted') {
+      return assignment.submission && 
+        (assignment.submission.status === 'SUBMITTED' || 
+         assignment.submission.status === 'UNDER_REVIEW' ||
+         assignment.submission.status === 'APPROVED' ||
+         assignment.submission.status === 'GRADED');
+    }
+    return true;
+  });
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -280,170 +318,279 @@ export default function StudentAssignmentsPage({ classId }: StudentAssignmentsPa
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Assignments</h1>
-        <p className="text-gray-600 mt-1">View and complete your class assignments</p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Assignments</h1>
+          <p className="text-gray-600 mt-1">View and complete your class assignments</p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => fetchAssignments()}
+          disabled={loading}
+        >
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <Card>
-          <CardContent className="p-4">
+      {/* Professional Statistics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Total</p>
-                <p className="text-2xl font-bold text-gray-900">{assignments.length}</p>
+                <p className="text-sm font-medium text-gray-600 mb-1">Total Assignments</p>
+                <p className="text-3xl font-bold text-gray-900">{assignments.length}</p>
               </div>
-              <FileText className="h-8 w-8 text-blue-500" />
+              <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                <FileText className="h-6 w-6 text-blue-600" />
+              </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+
+        <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Completed</p>
-                <p className="text-2xl font-bold text-green-600">
+                <p className="text-sm font-medium text-gray-600 mb-1">Completed</p>
+                <p className="text-3xl font-bold text-gray-900">
                   {assignments.filter(a => a.submission?.status === 'APPROVED' || a.submission?.status === 'GRADED').length}
                 </p>
               </div>
-              <CheckCircle2 className="h-8 w-8 text-green-500" />
+              <div className="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center">
+                <CheckCircle2 className="h-6 w-6 text-green-600" />
+              </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+
+        <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Pending</p>
-                <p className="text-2xl font-bold text-amber-600">
+                <p className="text-sm font-medium text-gray-600 mb-1">Pending Review</p>
+                <p className="text-3xl font-bold text-gray-900">
                   {assignments.filter(a => a.submission?.status === 'SUBMITTED' || a.submission?.status === 'UNDER_REVIEW').length}
                 </p>
               </div>
-              <Clock className="h-8 w-8 text-amber-500" />
+              <div className="h-12 w-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+                <Clock className="h-6 w-6 text-yellow-600" />
+              </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+
+        <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
+          <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">To Do</p>
-                <p className="text-2xl font-bold text-blue-600">
+                <p className="text-sm font-medium text-gray-600 mb-1">Not Started</p>
+                <p className="text-3xl font-bold text-gray-900">
                   {assignments.filter(a => !a.submission).length}
                 </p>
               </div>
-              <AlertCircle className="h-8 w-8 text-blue-500" />
+              <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                <AlertCircle className="h-6 w-6 text-blue-600" />
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Assignments List */}
-      <div className="space-y-4">
-        {assignments.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <FileText className="h-16 w-16 text-gray-400 mb-4" />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Assignments Yet</h3>
-              <p className="text-gray-600">Your instructor hasn't posted any assignments</p>
-            </CardContent>
-          </Card>
-        ) : (
-          assignments.map((assignment) => (
-            <Card key={assignment.id} className="overflow-hidden hover:shadow-lg transition-shadow">
-              <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <div className={`p-2 rounded-lg ${getTypeColor(assignment.type)}`}>
-                        {getTypeIcon(assignment.type)}
-                      </div>
-                      <div>
-                        <CardTitle className="text-xl">{assignment.title}</CardTitle>
-                        <div className="flex items-center gap-3 mt-1 flex-wrap">
-                          {getStatusBadge(assignment)}
-                          <span className="text-sm text-gray-600">
-                            {assignment.maxPoints} points
-                          </span>
-                          {assignment.lesson && (
-                            <span className="text-sm text-gray-600">
-                              Week {assignment.lesson.week}: {assignment.lesson.title}
-                            </span>
-                          )}
-                          {assignment.dueDate && (
-                            <span className={`text-sm flex items-center gap-1 ${
-                              isOverdue(assignment.dueDate) ? 'text-red-600 font-semibold' : 'text-gray-600'
-                            }`}>
-                              <Clock className="h-4 w-4" />
-                              Due: {new Date(assignment.dueDate).toLocaleDateString()}
-                              {isOverdue(assignment.dueDate) && ' (Overdue)'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-700 mt-2 whitespace-pre-wrap">
-                      {assignment.instructions}
-                    </p>
-
-                    {/* Show grade feedback if graded */}
-                    {assignment.submission?.grade && (
-                      <div className="mt-4 p-4 bg-green-50 rounded-lg border-l-4 border-green-500">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle2 className="h-5 w-5 text-green-600" />
-                          <span className="font-semibold text-green-900">
-                            Grade: {assignment.submission.grade.points}/{assignment.maxPoints} ({assignment.submission.grade.percentage.toFixed(1)}%)
-                          </span>
-                        </div>
-                        {assignment.submission.grade.instructorComment && (
-                          <div className="mt-2">
-                            <p className="text-sm font-medium text-green-900">Instructor Feedback:</p>
-                            <p className="text-sm text-green-800 mt-1">{assignment.submission.grade.instructorComment}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="flex flex-col gap-2 ml-4">
-                    {assignment.type === 'CHECKBOX' ? (
-                      !assignment.submission && (
-                        <Button
-                          onClick={() => handleCheckboxSubmit(assignment)}
-                          className="bg-gradient-to-r from-church-gold to-yellow-600"
-                        >
-                          <CheckSquare className="h-4 w-4 mr-2" />
-                          Mark Complete
-                        </Button>
-                      )
-                    ) : (
-                      canSubmit(assignment) && (
-                        <Button
-                          onClick={() => handleStartSubmission(assignment)}
-                          className="bg-gradient-to-r from-church-gold to-yellow-600"
-                        >
-                          <Send className="h-4 w-4 mr-2" />
-                          {assignment.submission ? 'Resubmit' : 'Submit'}
-                        </Button>
-                      )
-                    )}
-                    
-                    {assignment.submission?.fileUrl && (
-                      <Button
-                        variant="outline"
-                        onClick={() => window.open(assignment.submission.fileUrl, '_blank')}
-                      >
-                        View Submission
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </CardHeader>
-            </Card>
-          ))
-        )}
+      {/* Filter Tabs */}
+      <div className="flex gap-2 mb-6 border-b border-gray-200">
+        <button
+          onClick={() => setFilter('all')}
+          className={`px-6 py-3 font-medium transition-colors border-b-2 ${
+            filter === 'all'
+              ? 'border-church-gold text-church-gold'
+              : 'border-transparent text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          All Assignments ({assignments.length})
+        </button>
+        <button
+          onClick={() => setFilter('pending')}
+          className={`px-6 py-3 font-medium transition-colors border-b-2 ${
+            filter === 'pending'
+              ? 'border-church-gold text-church-gold'
+              : 'border-transparent text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          Pending ({assignments.filter(a => !a.submission || a.submission.status === 'DRAFT').length})
+        </button>
+        <button
+          onClick={() => setFilter('submitted')}
+          className={`px-6 py-3 font-medium transition-colors border-b-2 ${
+            filter === 'submitted'
+              ? 'border-church-gold text-church-gold'
+              : 'border-transparent text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          Submitted ({assignments.filter(a => a.submission && ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'GRADED'].includes(a.submission.status)).length})
+        </button>
       </div>
+
+      {/* Assignments Table */}
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gray-50">
+                  <TableHead className="font-bold">Week</TableHead>
+                  <TableHead className="font-bold">Assignment</TableHead>
+                  <TableHead className="font-bold">Type</TableHead>
+                  <TableHead className="font-bold text-center">Points</TableHead>
+                  <TableHead className="font-bold text-center">Due Date</TableHead>
+                  <TableHead className="font-bold text-center">Status</TableHead>
+                  <TableHead className="font-bold text-center">Grade</TableHead>
+                  <TableHead className="font-bold text-center">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredAssignments.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-12">
+                      <div className="flex flex-col items-center justify-center text-gray-500">
+                        <FileText className="h-12 w-12 mb-3 text-gray-300" />
+                        <p className="font-medium">
+                          {filter === 'all' ? 'No Assignments Yet' : 
+                           filter === 'pending' ? 'No Pending Assignments' : 
+                           'No Submitted Assignments'}
+                        </p>
+                        <p className="text-sm mt-1">
+                          {filter === 'all' ? "Your instructor hasn't posted any assignments" :
+                           filter === 'pending' ? "You don't have any pending assignments" :
+                           "You haven't submitted any assignments yet"}
+                        </p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredAssignments.map((assignment) => (
+                    <TableRow key={assignment.id} className="hover:bg-gray-50">
+                      <TableCell>
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 font-semibold">
+                          Week {assignment.lesson?.weekNumber || '-'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="font-medium text-gray-900">{assignment.title}</span>
+                          <span className="text-sm text-gray-500">{assignment.lesson?.title || 'No lesson'}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className={`flex items-center gap-2 w-fit px-2 py-1 rounded-lg ${getTypeColor(assignment.type)}`}>
+                          {getTypeIcon(assignment.type)}
+                          <span className="text-xs font-medium">{assignment.type}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center font-semibold">
+                        {assignment.maxPoints}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {assignment.dueDate ? (
+                          <div className="flex flex-col items-center">
+                            <span className={`text-sm ${
+                              isOverdue(assignment.dueDate) ? 'text-red-600 font-semibold' : 'text-gray-700'
+                            }`}>
+                              {new Date(assignment.dueDate).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </span>
+                            {isOverdue(assignment.dueDate) && !assignment.submission && (
+                              <Badge variant="destructive" className="mt-1 text-xs">Overdue</Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-sm">No due date</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {getStatusBadge(assignment)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {assignment.submission?.grade ? (
+                          <div className="flex flex-col items-center">
+                            <span className="font-semibold text-lg">
+                              {assignment.submission.grade.points}/{assignment.maxPoints}
+                            </span>
+                            <span className="text-xs text-gray-600">
+                              {assignment.submission.grade.percentage.toFixed(1)}%
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          {assignment.type === 'CHECKBOX' ? (
+                            assignment.submission ? (
+                              <Button
+                                size="sm"
+                                disabled
+                                className="bg-green-600 text-white cursor-not-allowed"
+                              >
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                                Done
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => handleCheckboxSubmit(assignment)}
+                                className="bg-gradient-to-r from-church-gold to-yellow-600"
+                              >
+                                <CheckSquare className="h-3 w-3 mr-1" />
+                                Complete
+                              </Button>
+                            )
+                          ) : (
+                            <>
+                              {canSubmit(assignment) ? (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleStartSubmission(assignment)}
+                                  className="bg-gradient-to-r from-church-gold to-yellow-600"
+                                >
+                                  <Send className="h-3 w-3 mr-1" />
+                                  {assignment.submission ? 'Resubmit' : 'Submit'}
+                                </Button>
+                              ) : assignment.submission && (assignment.submission.status === 'SUBMITTED' || assignment.submission.status === 'UNDER_REVIEW') ? (
+                                <Button
+                                  size="sm"
+                                  disabled
+                                  className="bg-green-600 text-white cursor-not-allowed"
+                                >
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                  Submitted
+                                </Button>
+                              ) : null}
+                            </>
+                          )}
+                          {assignment.submission?.fileUrl && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => window.open(assignment.submission.fileUrl, '_blank')}
+                            >
+                              View
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Submit Assignment Dialog */}
       <Dialog open={showSubmitDialog} onOpenChange={setShowSubmitDialog}>

@@ -405,16 +405,7 @@ export default function ClassesPage() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center justify-center gap-2">
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => navigate(`/class/${cls.id}`)}
-                                className="h-8"
-                              >
-                                <Eye className="h-3 w-3 mr-1" />
-                                View
-                              </Button>
+                            <div className="flex items-center justify-center">
                               <Button 
                                 size="sm" 
                                 variant="default"

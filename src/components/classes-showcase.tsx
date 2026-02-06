@@ -4,16 +4,14 @@ import { Cards } from "@/components/ui/cards"
 import { Badges } from "@/components/ui/badges"
 import { Button } from "@/components/ui/button"
 import { Clock, Users, BookOpen, GraduationCap } from "lucide-react"
-import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { classes } from "@/data/classesData"
 
 export function ClassesShowcase() {
-  const [activeCard, setActiveCard] = useState<number | null>(null);
   const navigate = useNavigate();
 
   return (
-    <section className="py-12">
+    <section className="py-12 bg-white/85">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="text-center mb-16 animate-fade-in-up">
           <h2 className="text-4xl md:text-5xl font-bold text-primary mb-4">
@@ -28,40 +26,23 @@ export function ClassesShowcase() {
           {classes.map((cls, index) => (
             <Cards
               key={cls.id}
-              className="group hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 overflow-hidden border-slate-200 animate-fade-in-up cursor-pointer"
+              className="group hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 overflow-hidden border-slate-200 animate-fade-in-up cursor-pointer !py-0 !gap-0"
               style={{ animationDelay: `${index * 100}ms` }}
               onClick={() => navigate(`/class/${cls.id}`)}
             >
-              <div className={`h-32 bg-gradient-to-br ${cls.color} relative overflow-hidden`}>
-                {/* Background Color Layer */}
-                <div className="absolute inset-0 bg-black/10 group-hover:bg-black/0 transition-colors" />
-                
-                {/* Image Layer - shown only on hover (desktop) or click (mobile) with book-flip */}
+              <div className="h-40 relative overflow-hidden">
+                {/* Image Layer - shown by default */}
                 <div 
-                  className={`absolute inset-0 transition-opacity duration-700 ease-out ${
-                    activeCard === index ? 'opacity-100' : 'opacity-0 lg:group-hover:opacity-100'
-                  }`}
+                  className="absolute inset-0"
                   style={{
                     backgroundImage: `url(${cls.image})`,
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
-                    transform: 'perspective(1000px) rotateY(0deg)',
-                    transformOrigin: 'left',
                   }}
                 />
-                
-                <div className="absolute top-4 left-4 z-10">
-                  <Badges className="bg-white/90 text-slate-900 backdrop-blur-sm">{cls.category}</Badges>
-                </div>
-                {cls.available && cls.available > 0 ? (
-                  <div className="absolute top-4 right-4">
-                    <Badges className="bg-green-500 text-white">{cls.available} spots</Badges>
-                  </div>
-                ) : cls.available === 0 ? (
-                  <div className="absolute top-4 right-4">
-                    <Badges className="bg-slate-700 text-white">Full</Badges>
-                  </div>
-                ) : null}
+                {/* Overlay for better text readability */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+ 
               </div>
 
               <div className="p-6">

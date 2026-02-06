@@ -6,6 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ChurchLogo } from '@/components/ChurchLogo';
 import { useToast } from '@/hooks/use-toast';
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -17,15 +20,31 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setLoading(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    setSent(true);
-    setLoading(false);
-    toast({
-      title: 'Reset link sent!',
-      description: 'Please check your email for the password reset link.',
-    });
+    try {
+      const response = await axios.post(`${API_URL}/auth/forgot-password`, {
+        email: email.trim(),
+      });
+
+      setSent(true);
+      toast({
+        title: 'Reset link sent!',
+        description: response.data.message || 'Please check your email for the password reset link.',
+      });
+    } catch (error: any) {
+      console.error('Forgot password error:', error);
+      
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.error ||
+                          'Failed to send reset link. Please try again.';
+      
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

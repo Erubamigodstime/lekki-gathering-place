@@ -1,10 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Users, Mail, Search, User } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
@@ -54,16 +62,12 @@ export default function PeoplePage({ classId, onMessageUser }: PeoplePageProps) 
     try {
       const token = localStorage.getItem('token');
 
-      // Fetch class details with instructor
+      // Fetch class details with instructor and enrollments
       const classResponse = await axios.get(`${API_URL}/classes/${classId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      // Fetch all approved enrollments for this class
-      const enrollmentsResponse = await axios.get(
-        `${API_URL}/enrollments?classId=${classId}&status=APPROVED`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      ).catch(() => ({ data: { data: [] } }));
+      console.log('Class response:', classResponse.data);
 
       const membersList: ClassMember[] = [];
       const classData = classResponse.data.data || classResponse.data;
@@ -71,6 +75,7 @@ export default function PeoplePage({ classId, onMessageUser }: PeoplePageProps) 
       // Add instructor first
       if (classData?.instructor) {
         const instructor = classData.instructor;
+        console.log('Instructor data:', instructor);
         membersList.push({
           id: instructor.userId || instructor.id,
           firstName: instructor.user?.firstName || instructor.firstName || 'Instructor',
@@ -81,23 +86,28 @@ export default function PeoplePage({ classId, onMessageUser }: PeoplePageProps) 
         });
       }
 
-      // Add all approved students - handle paginated response
-      const enrollData = enrollmentsResponse.data.data;
-      const enrollments = Array.isArray(enrollData) ? enrollData : (enrollData?.data || []);
-      enrollments.forEach((enrollment: any) => {
-        if (enrollment.status === 'APPROVED' && enrollment.student?.user) {
-          membersList.push({
-            id: enrollment.student.userId,
-            firstName: enrollment.student.user.firstName,
-            lastName: enrollment.student.user.lastName,
-            email: enrollment.student.user.email,
-            role: 'STUDENT',
-            profilePicture: enrollment.student.user.profilePicture,
-            enrollmentStatus: enrollment.status,
-          });
-        }
-      });
+      // Add all approved students from class enrollments
+      if (classData?.enrollments && Array.isArray(classData.enrollments)) {
+        console.log('Processing enrollments from class data:', classData.enrollments);
+        classData.enrollments.forEach((enrollment: any) => {
+          console.log('Enrollment item:', enrollment);
+          if (enrollment.status === 'APPROVED' && enrollment.student?.user) {
+            membersList.push({
+              id: enrollment.student.userId,
+              firstName: enrollment.student.user.firstName,
+              lastName: enrollment.student.user.lastName,
+              email: enrollment.student.user.email,
+              role: 'STUDENT',
+              profilePicture: enrollment.student.user.profilePicture,
+              enrollmentStatus: enrollment.status,
+            });
+          }
+        });
+      } else {
+        console.log('No enrollments found in class data');
+      }
 
+      console.log('Final members list:', membersList);
       setMembers(membersList);
       setFilteredMembers(membersList);
     } catch (error) {
@@ -141,133 +151,146 @@ export default function PeoplePage({ classId, onMessageUser }: PeoplePageProps) 
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <Card>
+        {/* Professional Statistics Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-6">
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-blue-100 rounded-lg">
-                  <User className="h-6 w-6 text-blue-600" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-2xl font-bold text-gray-900">
-                    {instructor ? 1 : 0}
-                  </div>
-                  <div className="text-sm text-gray-600">Instructor</div>
+                  <p className="text-sm font-medium text-gray-600 mb-1">Total Members</p>
+                  <p className="text-3xl font-bold text-gray-900">{members.length}</p>
+                </div>
+                <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Users className="h-6 w-6 text-blue-600" />
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-6">
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-green-100 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600 mb-1">Instructors</p>
+                  <p className="text-3xl font-bold text-gray-900">{instructor ? 1 : 0}</p>
+                </div>
+                <div className="h-12 w-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <User className="h-6 w-6 text-purple-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600 mb-1">Students</p>
+                  <p className="text-3xl font-bold text-gray-900">{students.length}</p>
+                </div>
+                <div className="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center">
                   <Users className="h-6 w-6 text-green-600" />
                 </div>
-                <div>
-                  <div className="text-2xl font-bold text-gray-900">{students.length}</div>
-                  <div className="text-sm text-gray-600">Students</div>
-                </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Instructor Section */}
-        {instructor && (
-          <div className="mb-8">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Instructor
-            </h2>
-            <Card className="border-2 border-church-gold/30">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <Avatar className="h-16 w-16">
-                      <AvatarFallback className="bg-church-gold text-white text-xl">
-                        {instructor.firstName[0]}
-                        {instructor.lastName[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <h3 className="text-xl font-semibold text-gray-900">
-                        {instructor.firstName} {instructor.lastName}
-                      </h3>
-                      <p className="text-gray-600">{instructor.email}</p>
-                      <Badge className="mt-2 bg-church-gold">Instructor</Badge>
-                    </div>
-                  </div>
-                  <Button 
-                    variant="outline"
-                    onClick={() => onMessageUser?.(instructor.id, `${instructor.firstName} ${instructor.lastName}`)}
-                  >
-                    <Mail className="h-4 w-4 mr-2" />
-                    Message
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* Students Section */}
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Students ({students.length})
-          </h2>
-
-          {students.length === 0 ? (
-            <Card>
-              <CardContent className="text-center py-12">
-                <Users className="h-16 w-16 mx-auto mb-4 text-gray-400" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  {searchQuery ? 'No students found' : 'No students enrolled yet'}
-                </h3>
-                <p className="text-gray-600">
-                  {searchQuery
-                    ? 'Try adjusting your search'
-                    : 'Students who enroll in this class will appear here'}
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-4">
-              {students.map((student) => (
-                <Card key={student.id} className="hover:border-church-gold transition-colors">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <Avatar className="h-12 w-12">
-                          <AvatarFallback className="bg-blue-100 text-blue-700">
-                            {student.firstName[0]}
-                            {student.lastName[0]}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <h4 className="font-semibold text-gray-900">
-                            {student.firstName} {student.lastName}
-                          </h4>
-                          <p className="text-sm text-gray-600">{student.email}</p>
+        {/* Class Members Table */}
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="font-bold">Name</TableHead>
+                    <TableHead className="font-bold">Email</TableHead>
+                    <TableHead className="font-bold text-center">Role</TableHead>
+                    <TableHead className="font-bold text-center">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredMembers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-12">
+                        <div className="flex flex-col items-center justify-center text-gray-500">
+                          <Users className="h-12 w-12 mb-3 text-gray-300" />
+                          <p className="font-medium">
+                            {searchQuery ? 'No members found' : 'No members yet'}
+                          </p>
+                          <p className="text-sm mt-1">
+                            {searchQuery
+                              ? 'Try adjusting your search'
+                              : 'Class members will appear here'}
+                          </p>
                         </div>
-                      </div>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => onMessageUser?.(student.id, `${student.firstName} ${student.lastName}`)}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredMembers.map((member) => (
+                      <TableRow 
+                        key={member.id} 
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => onMessageUser?.(member.id, `${member.firstName} ${member.lastName}`)}
                       >
-                        <Mail className="h-4 w-4 mr-2" />
-                        Message
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-10 w-10">
+                              {member.profilePicture && (
+                                <AvatarImage src={member.profilePicture} alt={`${member.firstName} ${member.lastName}`} />
+                              )}
+                              <AvatarFallback className={`${
+                                member.role === 'INSTRUCTOR' 
+                                  ? 'bg-purple-100 text-purple-700' 
+                                  : 'bg-blue-100 text-blue-700'
+                              }`}>
+                                {member.firstName[0]}{member.lastName[0]}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-medium text-gray-900">
+                                {member.firstName} {member.lastName}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-gray-700">{member.email}</span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge 
+                            className={`${
+                              member.role === 'INSTRUCTOR'
+                                ? 'bg-purple-100 text-purple-700'
+                                : 'bg-blue-100 text-blue-700'
+                            }`}
+                            variant="secondary"
+                          >
+                            {member.role === 'INSTRUCTOR' ? 'Instructor' : 'Student'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMessageUser?.(member.id, `${member.firstName} ${member.lastName}`);
+                            }}
+                            className="hover:bg-blue-50"
+                          >
+                            <Mail className="h-4 w-4 mr-2" />
+                            Message
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          )}
-        </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

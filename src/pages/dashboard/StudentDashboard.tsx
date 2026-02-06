@@ -9,6 +9,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { toast } from 'sonner';
+import { StudentAttendanceCard } from '@/components/attendance';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
@@ -37,7 +39,9 @@ interface AttendanceRecord {
   id: string;
   date: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  classId: string;
   class: {
+    id: string;
     name: string;
   };
 }
@@ -45,7 +49,6 @@ interface AttendanceRecord {
 export default function StudentDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const abortControllerRef = useRef<AbortController | null>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [schedule, setSchedule] = useState<ClassSchedule[]>([]);
   const [recommendedClasses, setRecommendedClasses] = useState<RecommendedClass[]>([]);
@@ -55,41 +58,127 @@ export default function StudentDashboard() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    const fetchEnrollments = async () => {
-      try {
-        // Abort previous request if any
-        if (abortControllerRef.current) {
-          abortControllerRef.current.abort();
-        }
-        abortControllerRef.current = new AbortController();
-        const { signal } = abortControllerRef.current;
+    let isMounted = true;
+    const abortController = new AbortController();
 
+    const fetchAllData = async () => {
+      try {
+        setLoading(true);
         const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_URL}/enrollments/my-classes`, {
+        if (!token) {
+          setLoading(false);
+          return;
+        }
+
+        // Fetch enrollments first
+        const enrollmentsResponse = await axios.get(`${API_URL}/enrollments/my-classes`, {
           headers: { Authorization: `Bearer ${token}` },
-          signal
+          signal: abortController.signal
         });
-        const enrollmentData = response.data.data || [];
+
+        if (!isMounted) return;
+
+        const enrollmentData = enrollmentsResponse.data.data || [];
         setEnrollments(enrollmentData);
-        
+
         // Build schedule from enrollments
         if (enrollmentData.length > 0) {
           buildScheduleFromEnrollments(enrollmentData);
         }
+
+        // Fetch attendance history and recommended classes in parallel
+        const [attendanceResponse, recommendedResponse] = await Promise.all([
+          axios.get(`${API_URL}/attendance/my-attendance`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: abortController.signal
+          }).catch(err => {
+            if (axios.isCancel(err)) return null;
+            console.error('Failed to fetch attendance history:', err);
+            return null;
+          }),
+          axios.get(`${API_URL}/classes`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: abortController.signal
+          }).catch(err => {
+            if (axios.isCancel(err)) return null;
+            console.error('Failed to fetch recommended classes:', err);
+            return null;
+          })
+        ]);
+
+        if (!isMounted) return;
+
+        // Process attendance history
+        if (attendanceResponse?.data) {
+          const records = attendanceResponse.data.data || [];
+          setAttendanceHistory(records);
+
+          // Calculate attendance rate
+          if (records.length > 0) {
+            const approved = records.filter((r: any) => r.status === 'APPROVED').length;
+            const rate = Math.round((approved / records.length) * 100);
+            setAttendanceRate(rate);
+          }
+
+          // Update schedule with attendance status
+          setSchedule(prevSchedule =>
+            prevSchedule.map(item => {
+              const todayAttendance = records.find((r: any) =>
+                r.classId === item.id &&
+                new Date(r.date).toDateString() === new Date().toDateString()
+              );
+
+              if (todayAttendance) {
+                return {
+                  ...item,
+                  attendanceMarked: true,
+                  attendanceStatus: todayAttendance.status,
+                  attendanceId: todayAttendance.id
+                };
+              }
+              return item;
+            })
+          );
+        }
+
+        // Process recommended classes
+        if (recommendedResponse?.data) {
+          const allClasses = recommendedResponse.data.data || [];
+          const enrolledClassIds = enrollmentData.map((e: any) => e.classId);
+          const recommended = allClasses
+            .filter((cls: any) => !enrolledClassIds.includes(cls.id))
+            .slice(0, 3)
+            .map((cls: any) => ({
+              id: cls.id,
+              name: cls.name,
+              instructor: cls.instructorName || 'TBD',
+              schedule: cls.schedule?.days?.join(', ') || 'TBD',
+              enrolled: cls._count?.enrollments || 0,
+              capacity: cls.maxCapacity || 30
+            }));
+          setRecommendedClasses(recommended);
+        }
+
       } catch (error) {
-        console.error('Failed to fetch enrollments:', error);
+        if (axios.isCancel(error)) {
+          // Ignore canceled requests
+          return;
+        }
+        if (isMounted) {
+          console.error('Failed to fetch dashboard data:', error);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchEnrollments();
+    fetchAllData();
 
     return () => {
-      // Cleanup: abort any pending requests
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      isMounted = false;
+      abortController.abort();
     };
   }, [refreshKey]);
 
@@ -105,188 +194,107 @@ export default function StudentDashboard() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
-  // Parallelize attendance history and recommended classes
-  useEffect(() => {
-    const fetchData = async () => {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-
-      try {
-        const signal = abortControllerRef.current?.signal;
-        
-        // Fetch attendance history and recommended classes in parallel
-        await Promise.all([
-          fetchAttendanceHistory(token, signal),
-          fetchRecommendedClasses(token, signal)
-        ]);
-      } catch (error) {
-        if (axios.isAxiosError(error) && error.name !== 'CanceledError') {
-          console.error('Failed to fetch dashboard data:', error);
-        }
-      }
-    };
-
-    fetchData();
-  }, []);
-
   const buildScheduleFromEnrollments = (enrollmentData: any[]) => {
     const scheduleData: ClassSchedule[] = [];
     const today = new Date().getDay(); // 0 = Sunday, 1 = Monday, etc.
-    
+
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const todayName = dayNames[today];
-    
+
     enrollmentData
       .filter((enrollment: any) => enrollment.status === 'APPROVED')
       .forEach((enrollment: any) => {
         const classData = enrollment.class;
-        if (classData.schedule?.days && classData.schedule?.days.length > 0) {
-          // Only show classes that are scheduled for today
-          classData.schedule.days.forEach((day: string) => {
-            const dayIndex = dayNames.indexOf(day);
-            
-            // Only add to schedule if this class is scheduled for today
-            if (dayIndex === today) {
-              scheduleData.push({
-                id: classData.id,
-                name: classData.name,
-                instructor: `${classData.instructor.user.firstName} ${classData.instructor.user.lastName}`,
-                time: `${classData.schedule.startTime || ''} - ${classData.schedule.endTime || ''}`,
-                day: todayName,
-                status: 'upcoming',
-                attendanceMarked: false,
-                attendanceStatus: undefined,
-                attendanceId: undefined
-              });
-            }
-          });
+        if (!classData || !classData.schedule?.days || classData.schedule.days.length === 0) {
+          return;
         }
-      });
-    
-    setSchedule(scheduleData);
-  };
 
-  const fetchAttendanceHistory = async (token: string, signal?: AbortSignal) => {
-    try {
-      const response = await axios.get(`${API_URL}/attendance/my-attendance`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal
-      });
-      
-      const records = response.data.data || [];
-      setAttendanceHistory(records);
-      
-      // Calculate attendance rate
-      if (records.length > 0) {
-        const approved = records.filter((r: any) => r.status === 'APPROVED').length;
-        const rate = Math.round((approved / records.length) * 100);
-        setAttendanceRate(rate);
-      }
-      
-      // Update schedule with attendance status
-      setSchedule(prevSchedule => 
-        prevSchedule.map(item => {
-          const todayAttendance = records.find((r: any) => 
-            r.classId === item.id && 
-            new Date(r.date).toDateString() === new Date().toDateString()
-          );
-          
-          if (todayAttendance) {
-            return {
-              ...item,
-              attendanceMarked: true,
-              attendanceStatus: todayAttendance.status,
-              attendanceId: todayAttendance.id
-            };
+        // Only show classes that are scheduled for today
+        classData.schedule.days.forEach((day: string) => {
+          const dayIndex = dayNames.indexOf(day);
+
+          // Only add to schedule if this class is scheduled for today
+          if (dayIndex === today) {
+            // Safely get instructor name
+            const instructorName = classData.instructor?.user
+              ? `${classData.instructor.user.firstName || ''} ${classData.instructor.user.lastName || ''}`.trim()
+              : classData.instructorName || 'TBD';
+
+            scheduleData.push({
+              id: classData.id,
+              name: classData.name,
+              instructor: instructorName,
+              time: `${classData.schedule?.startTime || ''} - ${classData.schedule?.endTime || ''}`,
+              day: todayName,
+              status: 'upcoming',
+              attendanceMarked: false,
+              attendanceStatus: undefined,
+              attendanceId: undefined
+            });
           }
-          return item;
-        })
-      );
-    } catch (error) {
-      console.error('Failed to fetch attendance history:', error);
-    }
-  };
-
-  const fetchRecommendedClasses = async (token: string, signal?: AbortSignal) => {
-    try {
-      // Get only first 10 classes for recommendations to avoid loading all classes
-      const response = await axios.get(`${API_URL}/classes?page=1&limit=10`, {
-        headers: { Authorization: `Bearer ${token}` },
-        signal
+        });
       });
-      
-      // Handle paginated response
-      const allClasses = response.data.data.data || response.data.data || [];
-      const enrolledClassIds = enrollments.map((e: any) => e.classId);
-      
-      // Filter out enrolled classes and get classes from same ward
-      const recommended = allClasses
-        .filter((c: any) => 
-          !enrolledClassIds.includes(c.id) && 
-          c.wardId === user?.wardId &&
-          c.status === 'ACTIVE'
-        )
-        .slice(0, 3)
-        .map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          instructor: `${c.instructor.user.firstName} ${c.instructor.user.lastName}`,
-          schedule: c.schedule?.days?.join(', ') || 'Schedule TBA',
-          enrolled: c._count?.enrollments || 0,
-          capacity: c.maxStudents || 0
-        }));
-      
-      setRecommendedClasses(recommended);
-    } catch (error) {
-      console.error('Failed to fetch recommended classes:', error);
-    }
+
+    setSchedule(scheduleData);
   };
 
   const markAttendance = async (classId: string) => {
     try {
       const token = localStorage.getItem('token');
-      
+
       // Optimistic UI update
-      setSchedule(prev => 
-        prev.map(item => 
-          item.id === classId 
+      setSchedule(prev =>
+        prev.map(item =>
+          item.id === classId
             ? { ...item, attendanceMarked: true, attendanceStatus: 'PENDING' as const }
             : item
         )
       );
-      
+
       await axios.post(
         `${API_URL}/attendance/mark`,
         { classId },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      
-      // Refresh attendance history
-      if (token) {
-        await fetchAttendanceHistory(token, abortControllerRef.current?.signal);
-      }
+
+      toast.success('Attendance marked successfully!', {
+        description: 'Waiting for instructor approval',
+      });
+
+      // Refresh data to get updated attendance
+      setRefreshKey(prev => prev + 1);
     } catch (error: any) {
       console.error('Failed to mark attendance:', error);
-      
+
       // Revert optimistic update on error
-      setSchedule(prev => 
-        prev.map(item => 
-          item.id === classId 
+      setSchedule(prev =>
+        prev.map(item =>
+          item.id === classId
             ? { ...item, attendanceMarked: false, attendanceStatus: undefined }
             : item
         )
       );
-      
-      alert(error.response?.data?.message || 'Failed to mark attendance');
+
+      toast.error('Failed to mark attendance', {
+        description: error.response?.data?.message || 'Please try again',
+      });
     }
   };
 
   const approvedEnrollments = enrollments.filter(e => e.status === 'APPROVED');
   const pendingEnrollments = enrollments.filter(e => e.status === 'PENDING');
 
-  console.log('Dashboard render - Total enrollments:', enrollments.length);
-  console.log('Dashboard render - Pending enrollments:', pendingEnrollments.length);
-  console.log('Dashboard render - Approved enrollments:', approvedEnrollments.length);
+  // Early return if user is not loaded yet
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-church-gold mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -367,13 +375,13 @@ export default function StudentDashboard() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg font-semibold flex items-center gap-2">
                   <Calendar className="h-5 w-5 text-church-gold" />
-                  {schedule[0]?.day}'s Classes - Mark Your Attendance
+                  {schedule[0]?.day || "Today"}'s Classes - Mark Your Attendance
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
                   {schedule.map((item, index) => (
-                    <div 
+                    <div
                       key={`${item.id}-${index}`}
                       className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-slate-50 to-blue-50 dark:from-slate-800 dark:to-slate-700 border border-slate-200 dark:border-slate-600"
                     >
@@ -387,11 +395,11 @@ export default function StudentDashboard() {
                             {item.instructor} • {item.time}
                           </p>
                           {item.attendanceMarked && (
-                            <Badge 
-                              variant="secondary" 
+                            <Badge
+                              variant="secondary"
                               className={
                                 item.attendanceStatus === 'APPROVED'
-                                  ? 'bg-green-100 text-green-700 mt-1' 
+                                  ? 'bg-green-100 text-green-700 mt-1'
                                   : item.attendanceStatus === 'REJECTED'
                                     ? 'bg-red-100 text-red-700 mt-1'
                                     : 'bg-yellow-100 text-yellow-700 mt-1 animate-pulse'
@@ -418,10 +426,10 @@ export default function StudentDashboard() {
                           )}
                         </div>
                       </div>
-                      
+
                       {!item.attendanceMarked ? (
-                        <Button 
-                          variant="default" 
+                        <Button
+                          variant="default"
                           size="sm"
                           onClick={() => markAttendance(item.id)}
                           className="bg-church-gold hover:bg-yellow-600 text-white"
@@ -430,8 +438,8 @@ export default function StudentDashboard() {
                           Mark Attendance
                         </Button>
                       ) : item.attendanceStatus === 'PENDING' ? (
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           disabled
                           className="border-yellow-500 text-yellow-600"
@@ -440,8 +448,8 @@ export default function StudentDashboard() {
                           Pending
                         </Button>
                       ) : item.attendanceStatus === 'APPROVED' ? (
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           disabled
                           className="border-green-500 text-green-600"
@@ -468,9 +476,9 @@ export default function StudentDashboard() {
                   <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
                   <p className="text-muted-foreground mb-2">You don't have any classes scheduled for today</p>
                   <p className="text-sm text-muted-foreground">
-                    {new Date().getDay() === 4 
-                      ? "Today is Thursday - check back if you have Thursday classes" 
-                      : new Date().getDay() === 5 
+                    {new Date().getDay() === 4
+                      ? "Today is Thursday - check back if you have Thursday classes"
+                      : new Date().getDay() === 5
                         ? "Today is Friday - check back if you have Friday classes"
                         : "Classes are held on Thursdays and Fridays"}
                   </p>
@@ -504,26 +512,28 @@ export default function StudentDashboard() {
               ) : (
                 <div className="space-y-4">
                   {enrollments.map((enrollment, index) => (
-                    <div 
+                    <div
                       key={enrollment.id}
                       className="flex items-center justify-between p-4 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors animate-slide-up"
                       style={{ animationDelay: `${index * 0.1}s` }}
                     >
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-xl bg-gradient-primary flex items-center justify-center text-primary-foreground font-bold">
-                          {enrollment.class.name.charAt(0)}
+                          {enrollment.class?.name?.charAt(0) || 'C'}
                         </div>
                         <div>
-                          <h4 className="font-semibold text-foreground">{enrollment.class.name}</h4>
+                          <h4 className="font-semibold text-foreground">{enrollment.class?.name || 'Class'}</h4>
                           <p className="text-sm text-muted-foreground">
-                            {enrollment.class.instructor.user.firstName} {enrollment.class.instructor.user.lastName}
-                            {enrollment.class.schedule?.days && ` • ${enrollment.class.schedule.days[0]}`}
+                            {enrollment.class?.instructor?.user
+                              ? `${enrollment.class.instructor.user.firstName} ${enrollment.class.instructor.user.lastName}`
+                              : 'Instructor TBD'}
+                            {enrollment.class?.schedule?.days && ` • ${enrollment.class.schedule.days[0]}`}
                           </p>
-                          <Badge 
-                            variant="secondary" 
+                          <Badge
+                            variant="secondary"
                             className={
-                              enrollment.status === 'APPROVED' 
-                                ? 'bg-green-100 text-green-700 mt-1' 
+                              enrollment.status === 'APPROVED'
+                                ? 'bg-green-100 text-green-700 mt-1'
                                 : enrollment.status === 'PENDING'
                                   ? 'bg-amber-100 text-amber-700 mt-1'
                                   : 'bg-red-100 text-red-700 mt-1'
@@ -533,10 +543,10 @@ export default function StudentDashboard() {
                           </Badge>
                         </div>
                       </div>
-                      
-                      {enrollment.status === 'APPROVED' && (
-                        <Button 
-                          variant="church" 
+
+                      {enrollment.status === 'APPROVED' && enrollment.class?.id && (
+                        <Button
+                          variant="church"
                           size="sm"
                           onClick={() => navigate(`/canvas/${enrollment.class.id}`)}
                         >
@@ -568,7 +578,7 @@ export default function StudentDashboard() {
               ) : (
                 <div className="grid gap-4 md:grid-cols-3">
                   {recommendedClasses.map((classItem, index) => (
-                    <div 
+                    <div
                       key={classItem.id}
                       className="p-4 rounded-xl border border-border hover:border-primary/50 hover:shadow-card transition-all cursor-pointer animate-slide-up"
                       style={{ animationDelay: `${index * 0.1}s` }}
@@ -595,63 +605,69 @@ export default function StudentDashboard() {
 
         {/* Right Column */}
         <div className="space-y-6">
-          {/* Attendance Calendar */}
+          {/* Class Attendance Calendar */}
           <Card className="shadow-card">
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg font-semibold">Attendance History</CardTitle>
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <ClipboardCheck className="h-5 w-5 text-church-blue" />
+                My Attendance
+              </CardTitle>
             </CardHeader>
-            <CardContent>
-              {attendanceHistory.length === 0 ? (
+            <CardContent className="space-y-4">
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-10">
+                  <Loader2 className="h-8 w-8 animate-spin text-church-blue mb-3" />
+                  <p className="text-sm text-muted-foreground">Loading attendance...</p>
+                </div>
+              ) : approvedEnrollments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10">
                   <div className="w-14 h-14 rounded-full bg-purple-100 flex items-center justify-center mb-3">
                     <ClipboardCheck className="h-7 w-7 text-purple-600" />
                   </div>
-                  <h4 className="font-semibold text-foreground mb-1">No Records Yet</h4>
-                  <p className="text-sm text-muted-foreground text-center max-w-xs">Your attendance history will appear here once you start attending classes.</p>
+                  <h4 className="font-semibold text-foreground mb-1">No Classes Yet</h4>
+                  <p className="text-sm text-muted-foreground text-center max-w-xs">
+                    Enroll in a class to start tracking your attendance.
+                  </p>
                 </div>
               ) : (
-                <>
-                  <div className="space-y-3">
-                    {attendanceHistory.slice(0, 7).map((record, index) => (
-                      <div 
-                        key={record.id}
-                        className="flex items-center justify-between py-2 border-b border-border last:border-0"
-                      >
-                        <div>
-                          <span className="text-sm font-medium text-foreground">
-                            {new Date(record.date).toLocaleDateString('en-US', { 
-                              month: 'short', 
-                              day: 'numeric' 
-                            })}
-                          </span>
-                          <p className="text-xs text-muted-foreground">{record.class.name}</p>
-                        </div>
-                        <Badge 
-                          variant="secondary"
-                          className={
-                            record.status === 'APPROVED'
-                              ? 'bg-green-100 text-green-700' 
-                              : record.status === 'REJECTED'
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-amber-100 text-amber-700'
-                          }
-                        >
-                          {record.status === 'APPROVED' && <CheckCircle className="h-3 w-3 mr-1" />}
-                          {record.status === 'PENDING' && <Clock className="h-3 w-3 mr-1" />}
-                          {record.status === 'APPROVED' ? 'Present' : record.status}
-                        </Badge>
-                      </div>
-                    ))}
+                <div className="space-y-4">
+                  {approvedEnrollments.map((enrollment) => {
+                    const classData = enrollment.class;
+                    if (!classData) return null;
+
+                    // Filter attendance records for this class
+                    const classAttendance = attendanceHistory.filter(
+                      (r) => r.classId === classData.id || r.class?.id === classData.id
+                    );
+
+                    return (
+                      <StudentAttendanceCard
+                        key={enrollment.id}
+                        classInfo={{
+                          id: classData.id,
+                          name: classData.name,
+                          schedule: classData.schedule,
+                        }}
+                        attendanceRecords={classAttendance}
+                        onMarkAttendance={async (classId: string, date: Date) => {
+                          await markAttendance(classId);
+                        }}
+                        loading={false}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Attendance Summary */}
+              {attendanceHistory.length > 0 && (
+                <div className="pt-4 border-t border-border">
+                  <div className="flex justify-between text-sm mb-2">
+                    <span className="text-muted-foreground">Overall Attendance Rate</span>
+                    <span className="font-medium text-foreground">{attendanceRate}%</span>
                   </div>
-                  
-                  <div className="mt-4 pt-4 border-t border-border">
-                    <div className="flex justify-between text-sm mb-2">
-                      <span className="text-muted-foreground">Attendance Rate</span>
-                      <span className="font-medium text-foreground">{attendanceRate}%</span>
-                    </div>
-                    <Progress value={attendanceRate} className="h-2" />
-                  </div>
-                </>
+                  <Progress value={attendanceRate} className="h-2" />
+                </div>
               )}
             </CardContent>
           </Card>
@@ -662,25 +678,25 @@ export default function StudentDashboard() {
               <CardTitle className="text-lg font-semibold">Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="w-full justify-start"
                 onClick={() => navigate('/classes')}
               >
                 <BookOpen className="mr-2 h-4 w-4" />
                 Browse All Classes
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="w-full justify-start"
                 onClick={() => navigate('/student')}
               >
                 <Calendar className="mr-2 h-4 w-4" />
                 View My Enrollments
               </Button>
-              {schedule.filter(item => item.day === 'Today').length > 0 && (
+              {schedule.length > 0 && (
                 <div className="pt-2 px-2 text-xs text-muted-foreground">
-                  💡 You have {schedule.filter(item => item.day === 'Today').length} class(es) today. 
+                  💡 You have {schedule.length} class(es) today.
                   Mark attendance above!
                 </div>
               )}

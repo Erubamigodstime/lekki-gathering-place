@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Check, X, Clock, Users, Calendar as CalendarIcon, CheckCircle } from 'lucide-react';
+import { Search, Check, X, Clock, Users, Calendar as CalendarIcon, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -66,6 +66,7 @@ export default function InstructorAttendancePage() {
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [classes, setClasses] = useState<InstructorClass[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -86,11 +87,17 @@ export default function InstructorAttendancePage() {
 
   const fetchInstructorClasses = async () => {
     try {
+      setError(null);
       const token = localStorage.getItem('token');
-      if (!token) return;
+      if (!token) {
+        setError('Authentication required. Please log in again.');
+        setLoading(false);
+        return;
+      }
 
       const response = await axios.get(`${API_URL}/classes`, {
         headers: { Authorization: `Bearer ${token}` },
+        timeout: 15000,
       });
 
       const allClasses = response.data.data?.data || response.data.data || [];
@@ -102,16 +109,26 @@ export default function InstructorAttendancePage() {
         id: cls.id,
         name: cls.name
       })));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch classes:', error);
+      const errorMessage = axios.isAxiosError(error)
+        ? error.response?.data?.message || 'Failed to load classes. Please try again.'
+        : 'An unexpected error occurred. Please refresh the page.';
+      setError(errorMessage);
+      setClasses([]);
     }
   };
 
   const fetchAttendanceRecords = async () => {
     try {
       setLoading(true);
+      setError(null);
       const token = localStorage.getItem('token');
-      if (!token) return;
+      if (!token) {
+        setError('Authentication required. Please log in again.');
+        setLoading(false);
+        return;
+      }
 
       const params: any = {};
       if (statusFilter !== 'all') {
@@ -120,25 +137,30 @@ export default function InstructorAttendancePage() {
 
       const response = await axios.get(`${API_URL}/attendance`, {
         headers: { Authorization: `Bearer ${token}` },
-        params
+        params,
+        timeout: 15000,
       });
 
-      const allAttendance = response.data.data || [];
+      // Handle paginated response: response.data.data is { data: [...], pagination: {...} }
+      const paginatedData = response.data.data || {};
+      const allAttendance = paginatedData.data || paginatedData || [];
       
       // Filter for instructor's classes only
       const classIds = classes.map(c => c.id);
-      const instructorAttendance = allAttendance.filter((record: AttendanceRecord) =>
-        classIds.includes(record.class.id)
-      );
+      const instructorAttendance = Array.isArray(allAttendance) 
+        ? allAttendance.filter((record: AttendanceRecord) =>
+            classIds.includes(record.class?.id)
+          )
+        : [];
 
       setAttendanceRecords(instructorAttendance);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch attendance:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch attendance records',
-        variant: 'destructive',
-      });
+      const errorMessage = axios.isAxiosError(error)
+        ? error.response?.data?.message || 'Failed to load attendance records. Please try again.'
+        : 'An unexpected error occurred. Please refresh the page.';
+      setError(errorMessage);
+      setAttendanceRecords([]);
     } finally {
       setLoading(false);
     }
@@ -234,9 +256,16 @@ export default function InstructorAttendancePage() {
   };
 
   const filteredRecords = attendanceRecords.filter(record => {
-    const studentName = `${record.student.user.firstName} ${record.student.user.lastName}`.toLowerCase();
-    const matchesSearch = studentName.includes(searchQuery.toLowerCase()) ||
-                         record.class.name.toLowerCase().includes(searchQuery.toLowerCase());
+    // Safely check if record and nested properties exist
+    if (!record?.student?.user || !record?.class) {
+      return false;
+    }
+    
+    const studentName = `${record.student.user.firstName || ''} ${record.student.user.lastName || ''}`.toLowerCase();
+    const className = (record.class.name || '').toLowerCase();
+    const query = searchQuery.toLowerCase();
+    
+    const matchesSearch = studentName.includes(query) || className.includes(query);
     const matchesClass = classFilter === 'all' || record.class.id === classFilter;
     const matchesStatus = statusFilter === 'all' || record.status === statusFilter.toUpperCase();
     return matchesSearch && matchesClass && matchesStatus;
@@ -276,8 +305,42 @@ export default function InstructorAttendancePage() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 sm:grid-cols-4">
+      {/* Error State */}
+      {error && (
+        <Card className="shadow-card border-l-4 border-l-red-500 bg-red-50 dark:bg-red-950/20">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-red-800 dark:text-red-300 mb-2">
+                  Unable to Load Attendance Data
+                </h3>
+                <p className="text-sm text-red-700 dark:text-red-400 mb-4">
+                  {error}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-red-600 text-red-600 hover:bg-red-100 dark:border-red-400 dark:text-red-400"
+                  onClick={() => {
+                    setError(null);
+                    fetchInstructorClasses();
+                  }}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Try Again
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Show content only if no error */}
+      {!error && (
+        <>
+          {/* Stats Cards */}
+          <div className="grid gap-4 sm:grid-cols-4">
         <Card className="shadow-card border-l-4 border-l-amber-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Pending</CardTitle>
@@ -370,8 +433,12 @@ export default function InstructorAttendancePage() {
       <Card className="shadow-card">
         <CardContent className="p-0">
           {loading ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">Loading attendance records...</p>
+            <div className="text-center py-16">
+              <div className="inline-flex items-center gap-3 text-muted-foreground">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <p className="text-lg font-medium">Loading attendance records...</p>
+              </div>
+              <p className="text-sm text-muted-foreground mt-2">Please wait while we fetch the data</p>
             </div>
           ) : filteredRecords.length === 0 ? (
             <div className="text-center py-12">
@@ -546,6 +613,8 @@ export default function InstructorAttendancePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </div>
   );
 }

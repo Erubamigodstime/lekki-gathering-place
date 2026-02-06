@@ -208,7 +208,7 @@ export const classes: ClassData[] = [
       issued: true,
       criteria: "Completion of final assessment and submission of required projects"
     },
-    image: "/images/content.webp",
+    image: "/images/photo-vid-2.webp",
     color: "from-blue-500 to-purple-500",
     students: 25,
     available: 15

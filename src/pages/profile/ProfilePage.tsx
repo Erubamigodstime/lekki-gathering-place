@@ -19,10 +19,16 @@ import { useToast } from '@/hooks/use-toast';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
-const wards = ['Central Ward', 'North Ward', 'South Ward', 'East Ward', 'West Ward'];
+
+interface Ward {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+}
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -31,13 +37,34 @@ export default function ProfilePage() {
   const [instructorStats, setInstructorStats] = useState<any>(null);
   const [studentEnrollments, setStudentEnrollments] = useState<any[]>([]);
   const [uploadingPicture, setUploadingPicture] = useState(false);
+  const [wards, setWards] = useState<Ward[]>([]);
+  const [loadingWards, setLoadingWards] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     email: '',
     phone: '',
-    ward: 'Central Ward',
+    wardId: '',
+    ward: '',
   });
+
+  // Fetch wards from backend
+  useEffect(() => {
+    const fetchWards = async () => {
+      try {
+        setLoadingWards(true);
+        const response = await axios.get(`${API_URL}/wards`);
+        if (response.data.success) {
+          setWards(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching wards:', error);
+      } finally {
+        setLoadingWards(false);
+      }
+    };
+    fetchWards();
+  }, []);
 
   // Fetch profile data from database on mount
   useEffect(() => {
@@ -58,7 +85,8 @@ export default function ProfilePage() {
           lastName: userData.lastName || '',
           email: userData.email || '',
           phone: userData.phone || '',
-          ward: userData.ward?.name || 'Central Ward',
+          wardId: userData.wardId || '',
+          ward: userData.ward?.name || '',
         });
 
         // Fetch additional data based on role
@@ -158,6 +186,7 @@ export default function ProfilePage() {
           firstName: formData.firstName,
           lastName: formData.lastName,
           phone: formData.phone,
+          wardId: formData.wardId,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -172,7 +201,15 @@ export default function ProfilePage() {
       const response = await axios.get(`${API_URL}/users/profile`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setProfileData(response.data.data);
+      const updatedProfile = response.data.data;
+      setProfileData(updatedProfile);
+      
+      // Update global user state
+      updateUser({
+        firstName: updatedProfile.firstName,
+        lastName: updatedProfile.lastName,
+        phone: updatedProfile.phone,
+      });
     } catch (error: any) {
       console.error('Failed to update profile:', error);
       toast({
@@ -227,7 +264,11 @@ export default function ProfilePage() {
       );
 
       // Update local profile data
-      setProfileData({ ...profileData, profilePicture: response.data.data.profilePicture });
+      const newProfilePicture = response.data.data.profilePicture;
+      setProfileData({ ...profileData, profilePicture: newProfilePicture });
+      
+      // Update global user state in AuthContext
+      updateUser({ profilePicture: newProfilePicture });
 
       toast({
         title: 'Profile picture updated',
@@ -251,7 +292,8 @@ export default function ProfilePage() {
       lastName: profileData?.lastName || '',
       email: profileData?.email || '',
       phone: profileData?.phone || '',
-      ward: profileData?.ward?.name || 'Central Ward',
+      wardId: profileData?.wardId || '',
+      ward: profileData?.ward?.name || '',
     });
     setIsEditing(false);
   };
@@ -413,13 +455,24 @@ export default function ProfilePage() {
                 <div className="flex items-center gap-3">
                   <MapPin className="h-5 w-5 text-muted-foreground" />
                   {isEditing ? (
-                    <Select value={formData.ward} onValueChange={(value) => setFormData({ ...formData, ward: value })}>
+                    <Select 
+                      value={formData.wardId} 
+                      onValueChange={(value) => {
+                        const selectedWard = wards.find(w => w.id === value);
+                        setFormData({ 
+                          ...formData, 
+                          wardId: value,
+                          ward: selectedWard?.name || '' 
+                        });
+                      }}
+                      disabled={loadingWards}
+                    >
                       <SelectTrigger className="flex-1">
-                        <SelectValue />
+                        <SelectValue placeholder={loadingWards ? "Loading wards..." : "Select ward"} />
                       </SelectTrigger>
                       <SelectContent>
                         {wards.map(ward => (
-                          <SelectItem key={ward} value={ward}>{ward}</SelectItem>
+                          <SelectItem key={ward.id} value={ward.id}>{ward.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

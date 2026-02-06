@@ -6,7 +6,7 @@ import { Clock, CheckCircle, XCircle, Calendar } from "lucide-react"
 
 export function AttendanceSystem() {
   return (
-    <section className="py-1">
+    <section className="py-1 bg-white/95">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="text-center mb-16 animate-fade-in-up">
           <h2 className="text-4xl md:text-5xl font-bold text-primary mb-4">

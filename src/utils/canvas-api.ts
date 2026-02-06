@@ -23,6 +23,42 @@ import type {
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
 
+// Helper to decode JWT and check expiration
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const expirationTime = payload.exp * 1000;
+    const currentTime = Date.now();
+    // Check if token expires in the next 5 minutes
+    return expirationTime < currentTime + (5 * 60 * 1000);
+  } catch (error) {
+    return true;
+  }
+}
+
+// Helper to refresh access token
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) {
+      return null;
+    }
+
+    const response = await axios.post(`${API_URL}/auth/refresh`, {
+      refreshToken,
+    });
+
+    const newAccessToken = response.data.data.accessToken;
+    localStorage.setItem('accessToken', newAccessToken);
+    localStorage.setItem('token', newAccessToken);
+
+    return newAccessToken;
+  } catch (error) {
+    console.error('Token refresh failed:', error);
+    return null;
+  }
+}
+
 // Create axios instance with auth token
 const api = axios.create({
   baseURL: API_URL,
@@ -31,14 +67,62 @@ const api = axios.create({
   },
 });
 
-// Add auth token to requests
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+// Add auth token to requests and refresh if needed
+api.interceptors.request.use(async (config) => {
+  let token = localStorage.getItem('token');
+  
+  // Check if token is expired or expiring soon
+  if (token && isTokenExpired(token)) {
+    console.log('Token expired or expiring soon, refreshing...');
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      token = newToken;
+      console.log('Token refreshed successfully');
+    } else {
+      console.error('Token refresh failed, redirecting to login');
+      // Clear tokens and redirect to login
+      localStorage.clear();
+      window.location.href = '/login';
+      return Promise.reject(new Error('Session expired'));
+    }
+  }
+  
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
+}, (error) => {
+  return Promise.reject(error);
 });
+
+// Add response interceptor to handle 401 errors
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    // If 401 and we haven't retried yet, try to refresh token
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      console.log('Received 401, attempting token refresh...');
+      const newToken = await refreshAccessToken();
+      
+      if (newToken) {
+        console.log('Token refreshed, retrying request...');
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return api(originalRequest);
+      } else {
+        console.error('Token refresh failed, clearing session');
+        // Clear tokens and redirect to login
+        localStorage.clear();
+        window.location.href = '/login';
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 // ============================================================================
 // LESSON API

@@ -207,7 +207,7 @@ export default function GradesPage({ classId }: GradesPageProps) {
         {/* Overall Performance Stats */}
         {publishedGrades.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <Card>
+            <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium text-gray-600">
                   Overall Grade
@@ -226,7 +226,7 @@ export default function GradesPage({ classId }: GradesPageProps) {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium text-gray-600">
                   Total Points
@@ -242,7 +242,7 @@ export default function GradesPage({ classId }: GradesPageProps) {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium text-gray-600">
                   Assignments Graded
@@ -258,7 +258,7 @@ export default function GradesPage({ classId }: GradesPageProps) {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-medium text-gray-600">
                   Pending Grades

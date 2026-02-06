@@ -12,6 +12,7 @@ import NotFound from "./pages/NotFound";
 import LoginPage from "./pages/auth/LoginPage";
 import SignupPage from "./pages/auth/SignupPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
 import DashboardPage from "./pages/dashboard/DashboardPage";
 import ClassesPage from "./pages/classes/ClassesPage";
 import ClassDetails from "./pages/classes/ClassDetails";
@@ -36,8 +37,8 @@ const App = () => (
         <TooltipProvider>
           <Toaster />
           <Sonner />
-        <BrowserRouter>
-          <Routes>
+          <BrowserRouter>
+            <Routes>
             {/* Public Routes */}
             <Route path="/" element={<Index />} />
             <Route path="/instructor/:id" element={<InstructorProfile />} />
@@ -46,6 +47,7 @@ const App = () => (
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             
             {/* Canvas LMS - Full Screen (No Dashboard Layout) - Routes to instructor or student canvas based on role */}
             <Route path="/canvas/:classId" element={<CanvasRouter />} />
@@ -72,10 +74,10 @@ const App = () => (
             {/* 404 Route */}
             <Route path="*" element={<NotFound />} />
           </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
-    </AuthProvider>
-  </QueryClientProvider>
+          </BrowserRouter>
+        </TooltipProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   </ErrorBoundary>
 );
 

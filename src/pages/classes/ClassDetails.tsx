@@ -133,7 +133,7 @@ export default function ClassDetails() {
       </div>
 
       {/* Content Layer */}
-      <div className="relative z-10">
+      <div className="relative bg-white/85 z-10">
         <main id="main-content" tabIndex={-1} aria-label="Class Details">
           {/* Hero Section */}
           <section className="pt-32 pb-16 md:pt-40 md:pb-24" aria-labelledby="class-name">
@@ -160,18 +160,7 @@ export default function ClassDetails() {
                         />
                       )}
                       <div className="absolute inset-0 bg-black/20" />
-                      <div className="absolute top-4 left-4">
-                        <Badges className="bg-white/90 text-slate-900 backdrop-blur-sm">
-                          {classData.category}
-                        </Badges>
-                      </div>
-                      {classData.available !== undefined && (
-                        <div className="absolute top-4 right-4">
-                          <Badges className={classData.available > 0 ? "bg-green-500 text-white" : "bg-slate-700 text-white"}>
-                            {classData.available > 0 ? `${classData.available} spots left` : "Full"}
-                          </Badges>
-                        </div>
-                      )}
+
                     </div>
                     
                     <div className="p-6">

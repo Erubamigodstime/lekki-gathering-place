@@ -192,7 +192,7 @@ export default function InstructorGradebookPage({ classId }: InstructorGradebook
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4 mb-8">
-        <Card>
+        <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -203,7 +203,7 @@ export default function InstructorGradebookPage({ classId }: InstructorGradebook
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -214,7 +214,7 @@ export default function InstructorGradebookPage({ classId }: InstructorGradebook
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -225,7 +225,7 @@ export default function InstructorGradebookPage({ classId }: InstructorGradebook
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>

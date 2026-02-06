@@ -51,25 +51,62 @@ interface InstructorInboxPageProps {
 }
 
 export default function InstructorInboxPage({ classId, onUnreadChange }: InstructorInboxPageProps) {
-  const [allUsers, setAllUsers] = useState<UserContact[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<UserContact[]>([]);
+  // ✨ ENTERPRISE: Initialize with cached data for instant display
+  const getCachedUsers = () => {
+    try {
+      const cached = sessionStorage.getItem(`inbox-users-${classId}`);
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const getCachedMessages = (userId: string): Message[] => {
+    try {
+      const cached = sessionStorage.getItem(`inbox-messages-${userId}`);
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const setCachedMessages = (userId: string, messages: Message[]) => {
+    try {
+      sessionStorage.setItem(`inbox-messages-${userId}`, JSON.stringify(messages));
+    } catch (e) {
+      console.warn('Failed to cache messages:', e);
+    }
+  };
+
+  const [allUsers, setAllUsers] = useState<UserContact[]>(getCachedUsers());
+  const [filteredUsers, setFilteredUsers] = useState<UserContact[]>(getCachedUsers());
   const [selectedUser, setSelectedUser] = useState<UserContact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
-  // In-memory cache for messages by userId
+  // In-memory cache for messages by userId - initialized with sessionStorage
   const messagesCache = useRef<{ [userId: string]: Message[] }>({});
+  // ENTERPRISE: Track last sequence number per conversation for sync
+  const lastSequenceRef = useRef<{ [conversationId: string]: number }>({});
+  const conversationIdRef = useRef<string | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(getCachedUsers().length === 0); // Only show loading if no cache
   const [sending, setSending] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  // ENTERPRISE: Message delivery status tracking
+  const [messageStatuses, setMessageStatuses] = useState<{ [id: string]: 'sent' | 'delivered' | 'read' }>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentUserId = localStorage.getItem('userId') || '';
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
 
-  // ✨ WebSocket connection for real-time messaging
-  const { isConnected, emitTypingStart, emitTypingStop } = useSocket({
+  // ✨ ENTERPRISE WebSocket connection: Pure real-time, NO polling!
+  const { isConnected, emitTypingStart, emitTypingStop, requestSync, sendDeliveryAck } = useSocket({
     onNewMessage: (message) => {
+      // Update last sequence number
+      if (message.conversationId && message.sequenceNumber) {
+        lastSequenceRef.current[message.conversationId] = message.sequenceNumber;
+      }
+
       // If message is from selected user, add to messages
       if (selectedUser && (message.senderId === selectedUser.id || message.receiverId === selectedUser.id)) {
         setMessages(prev => {
@@ -79,11 +116,46 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
             new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
           );
           messagesCache.current[selectedUser.id] = updated;
+          // ✨ ENTERPRISE: Persist to sessionStorage
+          setCachedMessages(selectedUser.id, updated);
           return updated;
         });
       }
-      // Refresh conversation list
-      fetchAllUsersAndConversations();
+      // Refresh conversation list (WebSocket event will update it)
+      fetchAllUsersAndConversations(false);
+    },
+    onDeliveryReceipt: (receipt) => {
+      // Update message status with delivery/read receipt
+      setMessageStatuses(prev => ({
+        ...prev,
+        [receipt.messageId]: receipt.status,
+      }));
+    },
+    onSyncResponse: (syncData) => {
+      // Handle missed messages after reconnection
+      if (syncData.messages && syncData.messages.length > 0) {
+        console.log(`Synced ${syncData.messages.length} missed messages`);
+        
+        // Add missed messages to current conversation if it matches
+        if (selectedUser) {
+          setMessages(prev => {
+            const combined = [...prev, ...syncData.messages];
+            // Remove duplicates and sort
+            const unique = combined.filter((msg, index, self) => 
+              self.findIndex(m => m.id === msg.id) === index
+            ).sort((a, b) => 
+              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            );
+            messagesCache.current[selectedUser.id] = unique;
+            return unique;
+          });
+        }
+      }
+
+      // Update last sequence
+      if (syncData.currentSequence && conversationIdRef.current) {
+        lastSequenceRef.current[conversationIdRef.current] = syncData.currentSequence;
+      }
     },
     onTypingStart: (data) => {
       if (selectedUser && data.senderId === selectedUser.id) {
@@ -114,26 +186,65 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
     return true;
   }, []);
 
-  const fetchMessages = useCallback(async (partnerId: string) => {
-    setMessagesLoading(true);
+  const fetchMessages = useCallback(async (partnerId: string, showLoading = true) => {
+    // Only show loading if explicitly requested and no cache exists
+    if (showLoading && !messagesCache.current[partnerId]) {
+      setMessagesLoading(true);
+    }
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_URL}/messages/thread/${partnerId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      // Always sort by createdAt ascending
-      const msgs = (response.data.data || []).slice().sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-      // Only update if different
-      if (!areMessagesEqual(msgs, messagesCache.current[partnerId] || [])) {
-        setMessages(msgs);
-        messagesCache.current[partnerId] = msgs;
+      
+      // Handle response - could be messages array or object with messages
+      const responseData = response.data.data;
+      const msgs = Array.isArray(responseData) 
+        ? responseData 
+        : (responseData.messages || []);
+      
+      // Sort by createdAt ascending
+      const sortedMsgs = msgs.slice().sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      
+      // ENTERPRISE: Store conversation ID and last sequence number
+      if (responseData.conversationId || response.data.conversationId) {
+        conversationIdRef.current = responseData.conversationId || response.data.conversationId;
       }
+      if (responseData.currentSequence || response.data.currentSequence) {
+        const convId = responseData.conversationId || response.data.conversationId;
+        lastSequenceRef.current[convId] = responseData.currentSequence || response.data.currentSequence;
+      }
+
+      // Only update if different
+      if (!areMessagesEqual(sortedMsgs, messagesCache.current[partnerId] || [])) {
+        setMessages(sortedMsgs);
+        messagesCache.current[partnerId] = sortedMsgs;
+        // ✨ ENTERPRISE: Persist to sessionStorage for instant display next time
+        setCachedMessages(partnerId, sortedMsgs);
+        
+        // Initialize message statuses
+        const statuses: { [id: string]: 'sent' | 'delivered' | 'read' } = {};
+        msgs.forEach(msg => {
+          if (msg.readAt) {
+            statuses[msg.id] = 'read';
+          } else if (msg.deliveredAt) {
+            statuses[msg.id] = 'delivered';
+          } else {
+            statuses[msg.id] = 'sent';
+          }
+        });
+        setMessageStatuses(statuses);
+      }
+      
       // Mark messages as read
       await axios.post(
         `${API_URL}/messages/thread/${partnerId}/mark-read`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
-      ).catch(() => {});
+      ).then(() => {
+        // ✨ ENTERPRISE: Refresh conversation list to update unread counts
+        fetchAllUsersAndConversations(false);
+      }).catch(() => {});
     } catch (error) {
       console.error('Failed to fetch messages:', error);
     } finally {
@@ -142,86 +253,82 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
   }, [areMessagesEqual]);
 
   useEffect(() => {
-    fetchAllUsersAndConversations();
+    // ✨ ENTERPRISE: Show cached data instantly, refresh in background
+    const hasCached = getCachedUsers().length > 0;
+    fetchAllUsersAndConversations(!hasCached); // Only show loading if no cache
     
-    // ✨ Reduced polling: only as fallback when WebSocket disconnected
-    let interval: NodeJS.Timeout;
-    
-    const startPolling = () => {
-      // Poll every 30s if WebSocket connected, every 10s if disconnected
-      const pollInterval = isConnected ? 30000 : 10000;
-      interval = setInterval(fetchAllUsersAndConversations, pollInterval);
-    };
-    
-    const stopPolling = () => {
-      if (interval) clearInterval(interval);
-    };
-    
-    // Start polling initially
-    startPolling();
-    
-    // Listen for visibility changes
+    // ✨ ENTERPRISE: NO POLLING! WebSocket handles all real-time updates
+    // Only refresh on visibility change (user returns to tab)
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        stopPolling();
-      } else {
-        fetchAllUsersAndConversations(); // Refresh immediately when tab becomes visible
-        startPolling();
+      if (!document.hidden) {
+        fetchAllUsersAndConversations(false); // Silent background refresh
+        
+        // ENTERPRISE: Request sync for missed messages if we have a conversation
+        if (conversationIdRef.current && selectedUser) {
+          const lastSeq = lastSequenceRef.current[conversationIdRef.current] || 0;
+          requestSync(selectedUser.id, lastSeq);
+        }
       }
     };
     
     document.addEventListener('visibilitychange', handleVisibilityChange);
     
     return () => {
-      stopPolling();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [classId, isConnected]);
+  }, [classId, selectedUser, requestSync]);
 
 
   // Optimistically clear chat and show cached messages instantly
   useEffect(() => {
     if (selectedUser) {
-      // Show cached messages instantly (if any)
-      setMessages(messagesCache.current[selectedUser.id] || []);
-      setMessagesLoading(true);
-      fetchMessages(selectedUser.id);
+      // ✨ ENTERPRISE: Load from sessionStorage first, then in-memory cache
+      let cachedMessages = messagesCache.current[selectedUser.id];
+      if (!cachedMessages || cachedMessages.length === 0) {
+        cachedMessages = getCachedMessages(selectedUser.id);
+        if (cachedMessages.length > 0) {
+          messagesCache.current[selectedUser.id] = cachedMessages;
+        }
+      }
       
-      // ✨ Reduced polling: WebSocket handles real-time, polling is backup
-      let interval: NodeJS.Timeout;
+      // Show cached messages instantly - ZERO loading state
+      if (cachedMessages && cachedMessages.length > 0) {
+        setMessages(cachedMessages);
+        setMessagesLoading(false);
+        // Silent background refresh
+        fetchMessages(selectedUser.id, false);
+      } else {
+        // No cache, show loading and fetch
+        setMessages([]);
+        setMessagesLoading(true);
+        fetchMessages(selectedUser.id, true);
+      }
       
-      const startPolling = () => {
-        // Poll every 60s if WebSocket connected, every 15s if disconnected
-        const pollInterval = isConnected ? 60000 : 15000;
-        interval = setInterval(() => fetchMessages(selectedUser.id), pollInterval);
-      };
-      
-      const stopPolling = () => {
-        if (interval) clearInterval(interval);
-      };
-      
-      startPolling();
-      
+      // ✨ ENTERPRISE: NO POLLING! WebSocket provides real-time updates
+      // Refresh only when user returns to the page
       const handleVisibilityChange = () => {
-        if (document.hidden) {
-          stopPolling();
-        } else {
-          fetchMessages(selectedUser.id); // Refresh immediately
-          startPolling();
+        if (!document.hidden) {
+          // Request sync for any missed messages
+          if (conversationIdRef.current) {
+            const lastSeq = lastSequenceRef.current[conversationIdRef.current] || 0;
+            requestSync(selectedUser.id, lastSeq);
+          }
+          // Also refresh from API as backup - silent background refresh
+          fetchMessages(selectedUser.id, false);
         }
       };
       
       document.addEventListener('visibilitychange', handleVisibilityChange);
       
       return () => {
-        stopPolling();
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     } else {
       setMessages([]);
       setIsTyping(false);
+      conversationIdRef.current = null;
     }
-  }, [selectedUser, fetchMessages, isConnected]);
+  }, [selectedUser, fetchMessages, requestSync]);
 
   useEffect(() => {
     scrollToBottom();
@@ -246,8 +353,9 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const fetchAllUsersAndConversations = async () => {
+  const fetchAllUsersAndConversations = async (showLoading = false) => {
     try {
+      if (showLoading) setLoading(true);
       const token = localStorage.getItem('token');
       
       if (!classId) {
@@ -268,7 +376,7 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
           headers: { Authorization: `Bearer ${token}` },
         }).catch((err) => {
           console.warn('Conversations endpoint failed, continuing with empty conversations:', err.message);
-          return { data: { data: [] } };
+          return { data: { data: { data: [] } } };
         }),
       ]);
 
@@ -278,7 +386,11 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
         ? enrollmentsData 
         : (enrollmentsData?.data || []);
       
-      const conversations = conversationsResponse.data.data || [];
+      // Extract conversations array from nested response structure
+      const conversationsData = conversationsResponse.data.data;
+      const conversations = Array.isArray(conversationsData) 
+        ? conversationsData 
+        : (conversationsData?.data || []);
 
       console.log('Fetched enrollments:', enrollments.length);
       console.log('Fetched conversations:', conversations.length);
@@ -329,14 +441,23 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
       setAllUsers(usersWithMessages);
       setFilteredUsers(usersWithMessages);
 
+      // ✨ ENTERPRISE: Cache users data for instant display next time
+      try {
+        sessionStorage.setItem(`inbox-users-${classId}`, JSON.stringify(usersWithMessages));
+      } catch (e) {
+        console.warn('Failed to cache users:', e);
+      }
+
       // Update unread count
       const totalUnread = usersWithMessages.reduce((sum: number, user: UserContact) => sum + (user.unreadCount || 0), 0);
       onUnreadChange?.(totalUnread);
     } catch (error: any) {
       console.error('Failed to fetch users and conversations:', error);
       
-      // More specific error message
-      if (error.message) {
+      if (error.response?.status === 429) {
+        console.warn('Rate limited - reducing request frequency');
+        // Don't show error toast for rate limiting during background refresh
+      } else if (error.message) {
         toast.error(error.message);
       } else if (error.response?.status === 404) {
         toast.error('Class not found or you are not enrolled as an instructor');
@@ -357,6 +478,31 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
     const messageContent = newMessage.trim();
     setNewMessage(''); // Clear input immediately for better UX
     
+    // Create optimistic message
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage: Message = {
+      id: tempId,
+      content: messageContent,
+      createdAt: new Date().toISOString(),
+      senderId: currentUserId,
+      receiverId: selectedUser.id,
+      sender: {
+        id: currentUserId,
+        firstName: 'You',
+        lastName: '',
+      },
+    };
+    
+    // Add message to UI immediately (optimistic update)
+    setMessages(prev => {
+      const updated = [...prev, optimisticMessage];
+      messagesCache.current[selectedUser.id] = updated;
+      return updated;
+    });
+
+    // ENTERPRISE: Set initial status as 'sent'
+    setMessageStatuses(prev => ({ ...prev, [tempId]: 'sent' }));
+    
     try {
       const token = localStorage.getItem('token');
       console.log('Sending message to:', selectedUser.id, 'Content:', messageContent);
@@ -376,15 +522,52 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
       );
 
       console.log('Message sent successfully:', response.data);
-      toast.success('Message sent');
       
-      // Refresh messages and conversations
-      await Promise.all([
-        fetchMessages(selectedUser.id),
-        fetchAllUsersAndConversations(),
-      ]);
+      // Replace optimistic message with real one from server
+      const realMessage = response.data.data;
+      
+      // ENTERPRISE: Update sequence number tracking
+      if (realMessage.conversationId && realMessage.sequenceNumber) {
+        lastSequenceRef.current[realMessage.conversationId] = realMessage.sequenceNumber;
+        if (!conversationIdRef.current) {
+          conversationIdRef.current = realMessage.conversationId;
+        }
+      }
+
+      setMessages(prev => {
+        const updated = prev.map(msg => 
+          msg.id === tempId ? realMessage : msg
+        );
+        messagesCache.current[selectedUser.id] = updated;
+        return updated;
+      });
+
+      // Update status with real message ID
+      setMessageStatuses(prev => {
+        const newStatuses = { ...prev };
+        delete newStatuses[tempId]; // Remove temp ID
+        newStatuses[realMessage.id] = 'sent'; // Real message starts as 'sent'
+        return newStatuses;
+      });
+      
+      // Refresh conversations list in background (don't await)
+      fetchAllUsersAndConversations();
     } catch (error: any) {
       console.error('Failed to send message:', error.response?.data || error.message);
+      
+      // Remove optimistic message on failure
+      setMessages(prev => {
+        const updated = prev.filter(msg => msg.id !== tempId);
+        messagesCache.current[selectedUser.id] = updated;
+        return updated;
+      });
+      
+      // Remove failed status
+      setMessageStatuses(prev => {
+        const newStatuses = { ...prev };
+        delete newStatuses[tempId];
+        return newStatuses;
+      });
       
       // Restore the message if send failed
       setNewMessage(messageContent);
@@ -429,8 +612,7 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
 
   const handleUserSelect = (user: UserContact) => {
     setSelectedUser(user);
-    setMessages([]); // Optimistically clear chat area instantly
-    setMessagesLoading(true);
+    // Don't clear messages - useEffect will handle showing cached/fetching
     // Reset unread count for this user locally
     setAllUsers(prev => prev.map(u => u.id === user.id ? { ...u, unreadCount: 0 } : u));
   };
@@ -474,12 +656,12 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
               {isConnected ? (
                 <>
                   <Wifi className="h-4 w-4 text-green-600" />
-                  <span className="text-xs text-green-600 font-medium">Real-time</span>
+                  <span className="text-xs text-green-600 font-medium">Online</span>
                 </>
               ) : (
                 <>
                   <WifiOff className="h-4 w-4 text-amber-500" />
-                  <span className="text-xs text-amber-600 font-medium">Fallback</span>
+                  <span className="text-xs text-amber-600 font-medium">Offline</span>
                 </>
               )}
             </div>
@@ -600,7 +782,7 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
                     {selectedUser.firstName} {selectedUser.lastName}
                   </h2>
                   <p className="text-xs text-gray-600">
-                    {selectedUser.isOnline ? 'Online' : selectedUser.role}
+                    {selectedUser.isOnline ? 'Online' : 'Offline'}
                   </p>
                 </div>
               </div>
@@ -641,6 +823,12 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
                 ) : (
                   messages.map((message) => {
                     const isFromMe = message.senderId === currentUserId;
+                    // Debug logging
+                    if (messages.indexOf(message) === 0) {
+                      console.log('Instructor Current User ID:', currentUserId);
+                      console.log('Message Sender ID:', message.senderId);
+                      console.log('Is From Me:', isFromMe);
+                    }
                     return (
                       <div
                         key={message.id}
@@ -660,11 +848,19 @@ export default function InstructorInboxPage({ classId, onUnreadChange }: Instruc
                                 {formatTime(message.createdAt)}
                               </span>
                               {isFromMe && (
-                                message.readAt ? (
-                                  <CheckCheck className="h-3 w-3 text-blue-500" />
-                                ) : (
-                                  <Check className="h-3 w-3 text-gray-500" />
-                                )
+                                (() => {
+                                  const status = messageStatuses[message.id] || 'sent';
+                                  if (status === 'read') {
+                                    // Double blue checkmarks (read)
+                                    return <CheckCheck className="h-3 w-3 text-blue-500" />;
+                                  } else if (status === 'delivered') {
+                                    // Double gray checkmarks (delivered but not read)
+                                    return <CheckCheck className="h-3 w-3 text-gray-500" />;
+                                  } else {
+                                    // Single gray checkmark (sent)
+                                    return <Check className="h-3 w-3 text-gray-500" />;
+                                  }
+                                })()
                               )}
                             </div>
                           </div>

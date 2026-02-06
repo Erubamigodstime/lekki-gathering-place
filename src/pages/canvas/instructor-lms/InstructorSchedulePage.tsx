@@ -262,7 +262,11 @@ export default function InstructorSchedulePage({ classId }: InstructorSchedulePa
           },
         });
 
-        fileUrl = uploadResponse.data.url;
+        fileUrl = uploadResponse.data.url || uploadResponse.data.data?.url;
+        
+        if (!fileUrl) {
+          throw new Error('No file URL returned from upload');
+        }
       }
 
       // Create course material
@@ -287,9 +291,10 @@ export default function InstructorSchedulePage({ classId }: InstructorSchedulePa
         url: '',
       });
       fetchScheduleData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to upload material:', error);
-      toast.error('Failed to upload material');
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to upload material';
+      toast.error(errorMessage);
     } finally {
       setUploading(false);
     }

@@ -35,6 +35,10 @@ interface Student {
     email: string;
     phone?: string;
     wardId?: string;
+    ward?: {
+      id: string;
+      name: string;
+    };
   };
   enrollments: Array<{
     id: string;
@@ -69,6 +73,10 @@ export default function InstructorStudentsPage() {
   useEffect(() => {
     if (classes.length > 0) {
       fetchStudents();
+    } else if (classes.length === 0 && !loading) {
+      // If no classes found after loading, set students to empty
+      setStudents([]);
+      setLoading(false);
     }
   }, [classes, classFilter]);
 
@@ -115,21 +123,42 @@ export default function InstructorStudentsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      const allEnrollments = response.data.data || [];
+      // Handle paginated response structure
+      const enrollmentData = response.data.data;
+      const allEnrollments = Array.isArray(enrollmentData) ? enrollmentData : (enrollmentData?.data || []);
+      console.log('All enrollments:', allEnrollments);
       
       // Filter enrollments for instructor's classes
       const classIds = classes.map(c => c.id);
-      const instructorEnrollments = allEnrollments.filter((enrollment: any) =>
-        classIds.includes(enrollment.classId) && enrollment.status === 'APPROVED'
-      );
+      console.log('Instructor class IDs:', classIds);
+      
+      const instructorEnrollments = allEnrollments.filter((enrollment: any) => {
+        const isInstructorClass = classIds.includes(enrollment.classId);
+        const isApproved = enrollment.status === 'APPROVED';
+        console.log(`Enrollment ${enrollment.id}: classId=${enrollment.classId}, status=${enrollment.status}, isInstructorClass=${isInstructorClass}, isApproved=${isApproved}`);
+        return isInstructorClass && isApproved;
+      });
+
+      console.log('Instructor enrollments:', instructorEnrollments);
 
       // Group by student and collect their classes
       const studentMap = new Map<string, Student>();
       
       instructorEnrollments.forEach((enrollment: any) => {
-        const studentId = enrollment.student.id;
+        const studentId = enrollment.student?.id;
+        
+        if (!studentId || !enrollment.student?.user) {
+          console.warn('Invalid enrollment data:', enrollment);
+          return;
+        }
         
         if (!studentMap.has(studentId)) {
+          console.log('Adding student to map:', {
+            studentId,
+            userName: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`,
+            ward: enrollment.student.user.ward,
+            wardId: enrollment.student.user.wardId
+          });
           studentMap.set(studentId, {
             id: enrollment.student.id,
             user: enrollment.student.user,
@@ -147,6 +176,7 @@ export default function InstructorStudentsPage() {
       });
 
       const studentsArray = Array.from(studentMap.values());
+      console.log('Students array:', studentsArray);
       
       // Filter by selected class if not 'all'
       let filteredStudents = studentsArray;
@@ -156,6 +186,7 @@ export default function InstructorStudentsPage() {
         );
       }
 
+      console.log('Final filtered students:', filteredStudents);
       setStudents(filteredStudents);
     } catch (error) {
       console.error('Failed to fetch students:', error);
@@ -270,8 +301,12 @@ export default function InstructorStudentsPage() {
       <Card className="shadow-card">
         <CardContent className="p-0">
           {loading ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">Loading students...</p>
+            <div className="text-center py-16">
+              <div className="inline-flex items-center gap-3 text-muted-foreground">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <p className="text-lg font-medium">Loading students...</p>
+              </div>
+              <p className="text-sm text-muted-foreground mt-2">Please wait while we fetch the data</p>
             </div>
           ) : filteredStudents.length === 0 ? (
             <div className="text-center py-12">
@@ -327,7 +362,7 @@ export default function InstructorStudentsPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">
-                        {student.user.wardId ? `Ward ${student.user.wardId.slice(0, 8)}` : 'N/A'}
+                        {student.user.ward?.name || 'N/A'}
                       </Badge>
                     </TableCell>
                     <TableCell>

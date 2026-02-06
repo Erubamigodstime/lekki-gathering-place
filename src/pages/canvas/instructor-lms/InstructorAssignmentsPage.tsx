@@ -89,6 +89,7 @@ interface Submission {
     dueDate?: string | null;
   };
   grade?: {
+    id?: string;
     points: number;
     percentage: number;
     instructorComment: string;
@@ -117,6 +118,7 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
   const [gradingSubmission, setGradingSubmission] = useState<Submission | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'pending'>('all');
   const [lessons, setLessons] = useState<any[]>([]);
+  const [savingGrade, setSavingGrade] = useState(false);
   
   const [formData, setFormData] = useState({
     title: '',
@@ -297,23 +299,54 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
     if (!gradingSubmission) return;
     
     try {
+      setSavingGrade(true);
       const token = localStorage.getItem('token');
+      
+      // Check if grade already exists
+      if (gradingSubmission.grade?.id) {
+        // Update existing grade
+        await axios.put(
+          `${API_URL}/grades/${gradingSubmission.grade.id}`,
+          {
+            points: gradeData.points,
+            maxPoints: gradingSubmission.assignment.maxPoints,
+            instructorComment: gradeData.instructorComment,
+            status: 'PUBLISHED',
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      } else {
+        // Create new grade
+        await axios.post(
+          `${API_URL}/grades`,
+          {
+            submissionId: gradingSubmission.id,
+            points: gradeData.points,
+            maxPoints: gradingSubmission.assignment.maxPoints,
+            instructorComment: gradeData.instructorComment,
+            status: 'PUBLISHED',
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      }
+      
+      // Approve the submission
       await axios.post(
         `${API_URL}/submissions/${gradingSubmission.id}/approve`,
-        {
-          points: gradeData.points,
-          maxPoints: gradingSubmission.assignment.maxPoints,
-          instructorComment: gradeData.instructorComment,
-          status: 'APPROVED',
-        },
+        {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('Submission graded!');
+      
+      toast.success('Submission graded successfully!');
       setShowGradeDialog(false);
-      fetchPendingSubmissions();
-    } catch (error) {
+      await fetchPendingSubmissions();
+    } catch (error: any) {
       console.error('Failed to grade submission:', error);
-      toast.error('Failed to grade submission');
+      console.error('Error response:', error.response?.data);
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to grade submission';
+      toast.error(errorMessage);
+    } finally {
+      setSavingGrade(false);
     }
   };
 
@@ -407,7 +440,7 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
 
         {/* Stats */}
         <div className="grid grid-cols-4 gap-4">
-          <Card>
+          <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -418,7 +451,7 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -431,7 +464,7 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -442,7 +475,7 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-l-4 border-l-blue-400 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -923,9 +956,9 @@ export default function InstructorAssignmentsPage({ classId }: InstructorAssignm
             <Button variant="outline" onClick={() => setShowGradeDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSaveGrade} className="bg-green-600 hover:bg-green-700">
+            <Button onClick={handleSaveGrade} className="bg-green-600 hover:bg-green-700" disabled={savingGrade}>
               <Save className="h-4 w-4 mr-2" />
-              Save Grade
+              {savingGrade ? 'Saving...' : 'Save Grade'}
             </Button>
           </DialogFooter>
         </DialogContent>

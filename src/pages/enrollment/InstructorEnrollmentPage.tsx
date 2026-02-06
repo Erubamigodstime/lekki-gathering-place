@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Check, X, Clock, Users, BookOpen, CheckCircle, UserCheck } from 'lucide-react';
+import { Search, Check, X, Clock, Users, BookOpen, CheckCircle, UserCheck, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -68,6 +68,7 @@ export default function InstructorEnrollmentPage() {
   const [enrollmentRecords, setEnrollmentRecords] = useState<EnrollmentRecord[]>([]);
   const [classes, setClasses] = useState<InstructorClass[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState('all');
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
@@ -87,11 +88,17 @@ export default function InstructorEnrollmentPage() {
 
   const fetchInstructorClasses = async () => {
     try {
+      setError(null);
       const token = localStorage.getItem('token');
-      if (!token) return;
+      if (!token) {
+        setError('Authentication required. Please log in again.');
+        setLoading(false);
+        return;
+      }
 
       const response = await axios.get(`${API_URL}/classes`, {
         headers: { Authorization: `Bearer ${token}` },
+        timeout: 15000,
       });
 
       const allClasses = response.data.data?.data || response.data.data || [];
@@ -103,31 +110,42 @@ export default function InstructorEnrollmentPage() {
         id: cls.id,
         name: cls.name
       })));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch classes:', error);
+      const errorMessage = axios.isAxiosError(error)
+        ? error.response?.data?.message || 'Failed to load classes. Please try again.'
+        : 'An unexpected error occurred. Please refresh the page.';
+      setError(errorMessage);
+      setClasses([]);
     }
   };
 
   const fetchPendingEnrollments = async () => {
     try {
       setLoading(true);
+      setError(null);
       const token = localStorage.getItem('token');
-      if (!token) return;
+      if (!token) {
+        setError('Authentication required. Please log in again.');
+        setLoading(false);
+        return;
+      }
 
       const response = await axios.get(`${API_URL}/enrollments`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { status: 'PENDING' }
+        params: { status: 'PENDING' },
+        timeout: 15000,
       });
 
       const allEnrollments = response.data.data || [];
-      setEnrollmentRecords(allEnrollments);
-    } catch (error) {
+      setEnrollmentRecords(Array.isArray(allEnrollments) ? allEnrollments : []);
+    } catch (error: any) {
       console.error('Failed to fetch enrollments:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch enrollment requests',
-        variant: 'destructive',
-      });
+      const errorMessage = axios.isAxiosError(error)
+        ? error.response?.data?.message || 'Failed to load enrollment requests. Please try again.'
+        : 'An unexpected error occurred. Please refresh the page.';
+      setError(errorMessage);
+      setEnrollmentRecords([]);
     } finally {
       setLoading(false);
     }
@@ -217,10 +235,19 @@ export default function InstructorEnrollmentPage() {
   };
 
   const filteredRecords = enrollmentRecords.filter(record => {
-    const studentName = `${record.student.user.firstName} ${record.student.user.lastName}`.toLowerCase();
-    const matchesSearch = studentName.includes(searchQuery.toLowerCase()) ||
-                         record.student.user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         record.class.name.toLowerCase().includes(searchQuery.toLowerCase());
+    // Safely check if record and nested properties exist
+    if (!record?.student?.user || !record?.class) {
+      return false;
+    }
+    
+    const studentName = `${record.student.user.firstName || ''} ${record.student.user.lastName || ''}`.toLowerCase();
+    const email = (record.student.user.email || '').toLowerCase();
+    const className = (record.class.name || '').toLowerCase();
+    const query = searchQuery.toLowerCase();
+    
+    const matchesSearch = studentName.includes(query) ||
+                         email.includes(query) ||
+                         className.includes(query);
     const matchesClass = classFilter === 'all' || record.class.id === classFilter;
     return matchesSearch && matchesClass;
   });
@@ -255,8 +282,42 @@ export default function InstructorEnrollmentPage() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      {/* Error State */}
+      {error && (
+        <Card className="shadow-card border-l-4 border-l-red-500 bg-red-50 dark:bg-red-950/20">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="h-6 w-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-red-800 dark:text-red-300 mb-2">
+                  Unable to Load Enrollment Data
+                </h3>
+                <p className="text-sm text-red-700 dark:text-red-400 mb-4">
+                  {error}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-red-600 text-red-600 hover:bg-red-100 dark:border-red-400 dark:text-red-400"
+                  onClick={() => {
+                    setError(null);
+                    fetchInstructorClasses();
+                  }}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Try Again
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Show content only if no error */}
+      {!error && (
+        <>
+          {/* Stats Cards */}
+          <div className="grid gap-4 sm:grid-cols-3">
         <Card className="shadow-card border-l-4 border-l-amber-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Pending Requests</CardTitle>
@@ -325,8 +386,12 @@ export default function InstructorEnrollmentPage() {
       <Card className="shadow-card">
         <CardContent className="p-0">
           {loading ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">Loading enrollment requests...</p>
+            <div className="text-center py-16">
+              <div className="inline-flex items-center gap-3 text-muted-foreground">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <p className="text-lg font-medium">Loading enrollment requests...</p>
+              </div>
+              <p className="text-sm text-muted-foreground mt-2">Please wait while we fetch the data</p>
             </div>
           ) : filteredRecords.length === 0 ? (
             <div className="text-center py-12">
@@ -350,25 +415,34 @@ export default function InstructorEnrollmentPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredRecords.map((record) => (
+                {filteredRecords.map((record) => {
+                  // Safely extract values with fallbacks
+                  const firstName = record?.student?.user?.firstName || '';
+                  const lastName = record?.student?.user?.lastName || '';
+                  const email = record?.student?.user?.email || '';
+                  const phone = record?.student?.user?.phone;
+                  const className = record?.class?.name || 'Unknown Class';
+                  const wardId = record?.student?.user?.wardId;
+                  
+                  return (
                   <TableRow key={record.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Avatar className="h-9 w-9">
                           <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-                            {record.student.user.firstName[0]}{record.student.user.lastName[0]}
+                            {firstName[0] || '?'}{lastName[0] || '?'}
                           </AvatarFallback>
                         </Avatar>
                         <div>
                           <p className="font-medium text-sm">
-                            {record.student.user.firstName} {record.student.user.lastName}
+                            {firstName} {lastName}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {record.student.user.email}
+                            {email}
                           </p>
-                          {record.student.user.phone && (
+                          {phone && (
                             <p className="text-xs text-muted-foreground">
-                              {record.student.user.phone}
+                              {phone}
                             </p>
                           )}
                         </div>
@@ -376,12 +450,12 @@ export default function InstructorEnrollmentPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="font-medium">
-                        {record.class.name}
+                        {className}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">
-                        Ward {record.student.user.wardId ? record.student.user.wardId.slice(0, 8) : 'N/A'}
+                        Ward {wardId ? wardId.slice(0, 8) : 'N/A'}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -414,7 +488,8 @@ export default function InstructorEnrollmentPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                );
+                })}
               </TableBody>
             </Table>
           )}
@@ -471,6 +546,8 @@ export default function InstructorEnrollmentPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { CheckCircle2, Circle, ChevronDown, ChevronRight, FileText, ClipboardList, Clock, CheckCheck, Loader, File, FileVideo, Link as LinkIcon, Download, Calendar } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { CheckCircle2, Circle, ChevronDown, ChevronRight, FileText, ClipboardList, Clock, CheckCheck, File, FileVideo, Link as LinkIcon, Download, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -18,8 +18,10 @@ type CompletionStatus = 'not_started' | 'pending' | 'approved';
 interface Lesson {
   id: string;
   title: string;
-  week: number;
+  weekNumber: number;
+  description?: string;
   content?: string;
+  isPublished: boolean;
   completionStatus: CompletionStatus;
   courseMaterials?: CourseMaterial[];
 }
@@ -54,20 +56,122 @@ interface ModulesPageProps {
   classId: string;
 }
 
+// Enterprise caching helpers
+const CACHE_KEYS = {
+  modules: (classId: string) => `student-modules-${classId}`,
+  classData: (classId: string) => `student-class-data-${classId}`,
+};
+
+const getCachedData = (key: string) => {
+  try {
+    const cached = sessionStorage.getItem(key);
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached);
+      // Cache valid for 5 minutes
+      if (Date.now() - timestamp < 5 * 60 * 1000) {
+        return data;
+      }
+    }
+  } catch (error) {
+    console.error('Cache read error:', error);
+  }
+  return null;
+};
+
+const setCachedData = (key: string, data: any) => {
+  try {
+    const serialized = JSON.stringify({ data, timestamp: Date.now() });
+    // Check if data is too large (>4.5MB as safety margin for 5MB limit)
+    if (serialized.length > 4.5 * 1024 * 1024) {
+      console.warn('Cache data too large, skipping cache');
+      return;
+    }
+    sessionStorage.setItem(key, serialized);
+  } catch (error: any) {
+    // Handle quota exceeded error
+    if (error.name === 'QuotaExceededError') {
+      console.warn('SessionStorage quota exceeded, clearing old caches');
+      // Clear old module caches
+      Object.keys(sessionStorage).forEach(k => {
+        if (k.startsWith('student-modules-') || k.startsWith('instructor-modules-')) {
+          sessionStorage.removeItem(k);
+        }
+      });
+      // Retry once
+      try {
+        sessionStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+      } catch (retryError) {
+        console.error('Cache write failed after cleanup:', retryError);
+      }
+    } else {
+      console.error('Cache write error:', error);
+    }
+  }
+};
+
+const invalidateModulesCache = (classId: string) => {
+  try {
+    sessionStorage.removeItem(CACHE_KEYS.modules(classId));
+    sessionStorage.removeItem(CACHE_KEYS.classData(classId));
+    // Set a flag to trigger storage event for other tabs
+    sessionStorage.setItem(`cache-invalidated-${classId}`, Date.now().toString());
+    setTimeout(() => sessionStorage.removeItem(`cache-invalidated-${classId}`), 100);
+  } catch (error) {
+    console.error('Cache invalidation error:', error);
+  }
+};
+
 export default function ModulesPage({ classId }: ModulesPageProps) {
   const [modules, setModules] = useState<WeekModule[]>([]);
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set([1]));
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
   const [classSchedule, setClassSchedule] = useState<any>(null);
+  const inMemoryCache = useRef<{ modules?: WeekModule[]; classData?: any }>({});
 
   useEffect(() => {
     fetchModules();
+
+    // Listen for storage events from other tabs (instructor changes)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && (e.key.startsWith('student-modules-') || e.key.startsWith('instructor-modules-'))) {
+        // Cache was invalidated in another tab, refetch
+        fetchModules(true);
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      // Clear in-memory cache on unmount
+      inMemoryCache.current = {};
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classId]);
 
-  const fetchModules = async () => {
+  const fetchModules = async (silent = false) => {
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No auth token found');
+        setLoading(false);
+        return;
+      }
+
+      // Show cached data instantly if available
+      const cachedModules = getCachedData(CACHE_KEYS.modules(classId));
+      const cachedClassData = getCachedData(CACHE_KEYS.classData(classId));
+      
+      if (cachedModules && cachedClassData && !silent) {
+        setModules(cachedModules);
+        setClassSchedule(cachedClassData.schedule);
+        inMemoryCache.current = { modules: cachedModules, classData: cachedClassData };
+        setLoading(false);
+        // Continue to fetch fresh data in background
+      }
+
+      if (!silent) setLoading(true);
       
       // Fetch class details with schedule
       const classResponse = await axios.get(`${API_URL}/classes/${classId}`, {
@@ -76,16 +180,10 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
 
       const classData = classResponse.data.data;
       const schedule = classData.schedule?.weeklyLessons || [];
-      const totalWeeks = classData.totalWeeks || 12; // Default to 12 weeks if not set
+      const totalWeeks = classData.totalWeeks || 12;
       setClassSchedule(classData.schedule);
 
-      console.log('Class schedule data:', {
-        totalWeeks,
-        hasWeeklyLessons: schedule.length > 0,
-        scheduleLength: schedule.length
-      });
-
-      // Fetch lessons for this class (created by instructor)
+      // Fetch ONLY published lessons for students (backend filters by default)
       const lessonsResponse = await axios.get(`${API_URL}/lessons/class/${classId}`, {
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => ({ data: { data: [] } }));
@@ -100,12 +198,20 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
       const lessonsData = lessonsResponse.data.data || [];
       const progressData = progressResponse.data.data || [];
 
+      console.log('📚 Student Modules - Fetched Data:', {
+        totalWeeks,
+        publishedLessons: lessonsData.length,
+        lessonsData,
+        progressData
+      });
+
       // Build modules structure
       const modulesData: WeekModule[] = [];
 
       for (let week = 1; week <= totalWeeks; week++) {
         const weekSchedule = schedule.find((s: any) => s.week === week);
-        const weekLessons = lessonsData.filter((l: any) => l.week === week);
+        // Use weekNumber field (correct field name from schema)
+        const weekLessons = lessonsData.filter((l: any) => l.weekNumber === week);
         const weekProgress = progressData.find((p: any) => p.weekNumber === week);
 
         // Determine completion status
@@ -118,14 +224,12 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
           }
         }
 
-        // If instructor has created custom lessons, use those (only published ones)
-        let lessons: any[] = [];
-        const publishedLessons = weekLessons.filter((l: any) => l.published);
+        // Only use instructor-created published lessons (backend already filters)
+        let lessons: Lesson[] = [];
         
-        if (publishedLessons.length > 0) {
-          // Use instructor-created lessons and fetch their materials
-          lessons = await Promise.all(publishedLessons.map(async (lesson: any) => {
-            // Fetch course materials for this lesson
+        if (weekLessons.length > 0) {
+          // Fetch materials for all lessons in parallel
+          lessons = await Promise.all(weekLessons.map(async (lesson: any) => {
             let courseMaterials: CourseMaterial[] = [];
             try {
               const materialsResponse = await axios.get(
@@ -140,18 +244,21 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
             return {
               id: lesson.id,
               title: lesson.title,
-              week: lesson.week,
-              content: lesson.content,
+              weekNumber: lesson.weekNumber, // Correct field name
+              description: lesson.description,
+              content: lesson.description, // Use description as content
+              isPublished: lesson.isPublished, // Correct field name
               completionStatus,
               courseMaterials,
             };
           }));
         } else if (weekSchedule) {
-          // Fallback to schedule data when no custom lessons exist
+          // Fallback to schedule data when no published lessons exist
           lessons = [{
             id: `schedule-${classId}-week-${week}`,
             title: weekSchedule.title || `Week ${week} Lesson`,
-            week: week,
+            weekNumber: week,
+            isPublished: false,
             content: `
               <div class="space-y-4">
                 ${weekSchedule.objectives ? `
@@ -201,15 +308,29 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
           week,
           title: weekSchedule?.title || `Week ${week}`,
           lessons,
-          assignments: [], // Will be fetched from assignments endpoint
+          assignments: [],
           completionStatus,
         });
       }
 
       setModules(modulesData);
-      console.log('Modules built:', modulesData.length, 'weeks');
-    } catch (error) {
-      console.error('Failed to fetch modules:', error);
+      inMemoryCache.current = { modules: modulesData, classData };
+      
+      // Cache for instant loading next time
+      setCachedData(CACHE_KEYS.modules(classId), modulesData);
+      setCachedData(CACHE_KEYS.classData(classId), classData);
+
+      console.log('✅ Student Modules Built:', modulesData.length, 'weeks');
+    } catch (error: any) {
+      console.error('❌ Failed to fetch modules:', error);
+      // Don't clear existing data on error if we have cached data
+      if (!inMemoryCache.current.modules) {
+        setModules([]);
+      }
+      // Show user-friendly error message
+      if (error.response?.status === 401) {
+        console.error('Authentication error - user may need to log in again');
+      }
     } finally {
       setLoading(false);
     }
@@ -232,7 +353,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
       const token = localStorage.getItem('token');
       const userId = localStorage.getItem('userId');
 
-      // Immediately update UI to show pending status
+      // Optimistic UI update
       setModules((prev) =>
         prev.map((module) => {
           if (module.week === week) {
@@ -249,7 +370,6 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
         })
       );
 
-      // Send to backend
       await axios.post(
         `${API_URL}/week-progress`,
         {
@@ -260,26 +380,12 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Optionally refresh to get latest data from server
-      // fetchModules();
+      // Refresh to get server state
+      fetchModules(true);
     } catch (error) {
       console.error('Failed to mark week complete:', error);
       // Revert on error
-      setModules((prev) =>
-        prev.map((module) => {
-          if (module.week === week) {
-            return {
-              ...module,
-              completionStatus: 'not_started' as CompletionStatus,
-              lessons: module.lessons.map(lesson => ({
-                ...lesson,
-                completionStatus: 'not_started' as CompletionStatus
-              }))
-            };
-          }
-          return module;
-        })
-      );
+      fetchModules(true);
     }
   };
 
@@ -334,9 +440,6 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
     );
   }
 
-  console.log('Render check:', { loading, modulesCount: modules.length, hasSelectedLesson: !!selectedLesson });
-  console.log('First 2 modules:', modules.slice(0, 2));
-
   // If viewing a specific lesson
   if (selectedLesson) {
     return (
@@ -354,7 +457,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <Badge variant="outline" className="mb-2 border-blue-500 text-blue-700">
-                  Week {selectedLesson.week}
+                  Week {selectedLesson.weekNumber}
                 </Badge>
                 <CardTitle className="text-xl sm:text-2xl text-gray-900">{selectedLesson.title}</CardTitle>
               </div>
@@ -426,7 +529,7 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent className="w-56">
-                    <DropdownMenuItem onClick={() => markWeekComplete(selectedLesson.week)}>
+                    <DropdownMenuItem onClick={() => markWeekComplete(selectedLesson.weekNumber)}>
                       <CheckCircle2 className="h-4 w-4 mr-2 text-yellow-500" />
                       Submit for Approval
                     </DropdownMenuItem>
