@@ -36,47 +36,54 @@ export function createQueryClientWithPersistence(): QueryClient {
     },
   });
 
-  // Create a persister using localStorage
-  const persister = createSyncStoragePersister({
-    storage: window.localStorage,
-    key: 'lgp-query-cache',
-    // Only persist successful queries
-    serialize: (data) => JSON.stringify(data),
-    deserialize: (data) => JSON.parse(data),
-  });
-
-  // Set up persistence
-  persistQueryClient({
-    queryClient,
-    persister,
-    // Max age of persisted cache: 24 hours
-    maxAge: 24 * 60 * 60 * 1000,
-    // Dehydrate options - which queries to persist
-    dehydrateOptions: {
-      shouldDehydrateQuery: (query) => {
+  // Only set up persistence in browser environment
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      // Create a persister using localStorage
+      const persister = createSyncStoragePersister({
+        storage: window.localStorage,
+        key: 'lgp-query-cache',
         // Only persist successful queries
-        if (query.state.status !== 'success') return false;
-        
-        // Get the query key as string for checking
-        const queryKey = JSON.stringify(query.queryKey);
-        
-        // Persist important data for offline access
-        const persistedQueries = [
-          'classes',
-          'class-detail',
-          'my-enrollments',
-          'my-classes',
-          'my-attendance',
-          'lessons',
-          'user-profile',
-          'instructor-profile',
-          'wards',
-        ];
-        
-        return persistedQueries.some(key => queryKey.includes(key));
-      },
-    },
-  });
+        serialize: (data) => JSON.stringify(data),
+        deserialize: (data) => JSON.parse(data),
+      });
+
+      // Set up persistence
+      persistQueryClient({
+        queryClient,
+        persister,
+        // Max age of persisted cache: 24 hours
+        maxAge: 24 * 60 * 60 * 1000,
+        // Dehydrate options - which queries to persist
+        dehydrateOptions: {
+          shouldDehydrateQuery: (query) => {
+            // Only persist successful queries
+            if (query.state.status !== 'success') return false;
+            
+            // Get the query key as string for checking
+            const queryKey = JSON.stringify(query.queryKey);
+            
+            // Persist important data for offline access
+            const persistedQueries = [
+              'classes',
+              'class-detail',
+              'my-enrollments',
+              'my-classes',
+              'my-attendance',
+              'lessons',
+              'user-profile',
+              'instructor-profile',
+              'wards',
+            ];
+            
+            return persistedQueries.some(key => queryKey.includes(key));
+          },
+        },
+      });
+    } catch (error) {
+      console.warn('Failed to set up query persistence:', error);
+    }
+  }
 
   return queryClient;
 }

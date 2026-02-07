@@ -14,6 +14,17 @@ export function InstallPrompt() {
   const [isDismissed, setIsDismissed] = useState(false);
   const [showFullPrompt, setShowFullPrompt] = useState(false);
 
+  // Check if recently dismissed - MUST be before any early returns
+  useEffect(() => {
+    const dismissedAt = localStorage.getItem('pwa-install-dismissed');
+    if (dismissedAt) {
+      const hoursSinceDismiss = (Date.now() - parseInt(dismissedAt)) / (1000 * 60 * 60);
+      if (hoursSinceDismiss < 24) {
+        setIsDismissed(true);
+      }
+    }
+  }, []);
+
   // Show full prompt after a delay for better UX
   useEffect(() => {
     if (isInstallable && !isDismissed) {
@@ -41,17 +52,6 @@ export function InstallPrompt() {
     // Remember dismissal for 24 hours
     localStorage.setItem('pwa-install-dismissed', Date.now().toString());
   };
-
-  // Check if recently dismissed
-  useEffect(() => {
-    const dismissedAt = localStorage.getItem('pwa-install-dismissed');
-    if (dismissedAt) {
-      const hoursSinceDismiss = (Date.now() - parseInt(dismissedAt)) / (1000 * 60 * 60);
-      if (hoursSinceDismiss < 24) {
-        setIsDismissed(true);
-      }
-    }
-  }, []);
 
   if (!showFullPrompt) {
     // Mini floating button
