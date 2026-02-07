@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Send, User, Loader2, Phone, Video, MoreVertical, Check, CheckCheck, Smile, Paperclip, Mic, Wifi, WifiOff } from 'lucide-react';
+import { Search, Send, User, Loader2, Phone, Video, MoreVertical, Check, CheckCheck, Smile, Paperclip, Mic, Wifi, WifiOff, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -96,6 +96,8 @@ export default function StudentInboxPage({ classId, preSelectedRecipient, onClea
   const [isTyping, setIsTyping] = useState(false);
   // ENTERPRISE: Message delivery status tracking
   const [messageStatuses, setMessageStatuses] = useState<{ [id: string]: 'sent' | 'delivered' | 'read' }>({});
+  // ENTERPRISE: Mobile-responsive state for WhatsApp-like UX
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentUserId = localStorage.getItem('userId') || '';
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
@@ -629,6 +631,13 @@ export default function StudentInboxPage({ classId, preSelectedRecipient, onClea
     // Don't clear messages - useEffect will handle showing cached/fetching
     // Reset unread count for this user locally
     setAllUsers(prev => prev.map(u => u.id === user.id ? { ...u, unreadCount: 0 } : u));
+    // ENTERPRISE: Open chat view on mobile with animation
+    setIsMobileChatOpen(true);
+  };
+
+  // ENTERPRISE: Handle mobile back navigation
+  const handleMobileBack = () => {
+    setIsMobileChatOpen(false);
   };
 
   const formatTime = (dateString: string) => {
@@ -658,9 +667,16 @@ export default function StudentInboxPage({ classId, preSelectedRecipient, onClea
   }
 
   return (
-    <div className="flex h-screen bg-[#0a1628]">
+    <div className="flex h-screen bg-[#0a1628] relative overflow-hidden">
       {/* Left Sidebar - All Contacts */}
-      <div className="w-[380px] bg-white border-r border-gray-200 flex flex-col">
+      {/* On mobile: Full width, hidden when chat is open */}
+      {/* On desktop: Fixed width 380px, always visible */}
+      <div className={`
+        w-full md:w-[380px] bg-white border-r border-gray-200 flex flex-col
+        absolute md:relative inset-0 z-20 md:z-auto
+        transition-transform duration-500 ease-in-out
+        ${isMobileChatOpen ? '-translate-x-full md:translate-x-0' : 'translate-x-0'}
+      `}>
         {/* Header */}
         <div className="bg-[#f0f2f5] p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
@@ -789,12 +805,28 @@ export default function StudentInboxPage({ classId, preSelectedRecipient, onClea
       </div>
 
       {/* Right Chat Area */}
-      <div className="flex-1 flex flex-col bg-[#e5ddd5]">
+      {/* On mobile: Full width, slides in from right when chat is open */}
+      {/* On desktop: Flex-1, always visible */}
+      <div className={`
+        flex-1 flex flex-col bg-[#e5ddd5]
+        absolute md:relative inset-0 z-30 md:z-auto
+        transition-transform duration-500 ease-in-out
+        ${isMobileChatOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}
+      `}>
         {selectedUser ? (
           <>
             {/* Chat Header */}
             <div className="bg-[#f0f2f5] border-b border-gray-200 px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
+                {/* Mobile Back Button */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleMobileBack}
+                  className="md:hidden text-gray-600 hover:text-gray-900 -ml-2"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </Button>
                 <Avatar className="h-10 w-10">
                   <AvatarImage src={selectedUser.profilePicture} />
                   <AvatarFallback className={`font-semibold ${
@@ -957,7 +989,8 @@ export default function StudentInboxPage({ classId, preSelectedRecipient, onClea
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-[#f8f9fa]">
+          /* Empty state - only visible on desktop */
+          <div className="flex-1 hidden md:flex items-center justify-center bg-[#f8f9fa]">
             <div className="text-center">
               <div className="bg-white rounded-full p-8 inline-block mb-4 shadow-lg">
                 <User className="h-16 w-16 text-gray-400" />
