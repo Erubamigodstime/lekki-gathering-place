@@ -76,7 +76,7 @@ export function InstallPrompt() {
         </div>
         
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-sm">Install LGP Skills</h3>
+          <h3 className="font-semibold text-sm"> install the lekki stake gathering place LMS </h3>
           <p className="text-xs text-white/80 mt-0.5">
             Get quick access, offline mode & class reminders
           </p>
