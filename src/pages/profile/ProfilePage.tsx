@@ -19,6 +19,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
+import { NotificationSettings } from '@/components/pwa/NotificationSettings';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
 
@@ -519,6 +520,11 @@ export default function ProfilePage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Notification Settings - Show only for students */}
+      {profileData?.role === 'STUDENT' && (
+        <NotificationSettings />
       )}
     </div>
   );

@@ -1,10 +1,16 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+
+// PWA Components
+import { InstallPrompt, OfflineIndicator, UpdatePrompt } from "@/components/pwa";
+
+// Query Client with offline persistence
+import { queryClient } from "@/lib/queryClient";
 
 // Pages
 import Index from "./pages/Index";
@@ -28,17 +34,6 @@ import CanvasRouter from "./pages/canvas/CanvasRouter";
 // Layout
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 5 * 60 * 1000, // 5 minutes - data won't refetch if younger than this
-      gcTime: 30 * 60 * 1000, // 30 minutes - keep in cache
-      refetchOnWindowFocus: false, // Don't refetch when tab regains focus
-      retry: 1, // Only retry once on failure
-    },
-  },
-});
-
 const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
@@ -46,6 +41,10 @@ const App = () => (
         <TooltipProvider>
           <Toaster />
           <Sonner />
+          {/* PWA UI Components */}
+          <OfflineIndicator />
+          <UpdatePrompt />
+          <InstallPrompt />
           <BrowserRouter>
             <Routes>
             {/* Public Routes */}
