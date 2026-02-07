@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Search, Filter, Users as UsersIcon, Mail, Phone, BookOpen, ClipboardCheck, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
@@ -22,7 +23,9 @@ import {
 } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
+import { useState } from 'react';
 import axios from 'axios';
+import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
 
@@ -34,6 +37,7 @@ interface Student {
     lastName: string;
     email: string;
     phone?: string;
+    profilePicture?: string;
     wardId?: string;
     ward?: {
       id: string;
@@ -60,86 +64,45 @@ interface InstructorClass {
 
 export default function InstructorStudentsPage() {
   const { user } = useAuth();
-  const [students, setStudents] = useState<Student[]>([]);
-  const [classes, setClasses] = useState<InstructorClass[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState('all');
 
-  useEffect(() => {
-    fetchInstructorClasses();
-  }, []);
-
-  useEffect(() => {
-    if (classes.length > 0) {
-      fetchStudents();
-    } else if (classes.length === 0 && !loading) {
-      // If no classes found after loading, set students to empty
-      setStudents([]);
-      setLoading(false);
-    }
-  }, [classes, classFilter]);
-
-  const fetchInstructorClasses = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('No token found');
-        return;
-      }
-
-      // Fetch instructor's classes
+  // Fetch instructor's classes
+  const { data: classes = [], isLoading: classesLoading } = useQuery({
+    queryKey: queryKeys.instructorMyClasses,
+    queryFn: async () => {
       const response = await axios.get(`${API_URL}/classes`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
-
       const allClasses = response.data.data?.data || response.data.data || [];
-      
       // Filter classes where this instructor is teaching
-      const instructorClasses = allClasses.filter((cls: any) => 
-        cls.instructor?.userId === user?.id
-      );
+      return allClasses
+        .filter((cls: any) => cls.instructor?.userId === user?.id)
+        .map((cls: any) => ({ id: cls.id, name: cls.name }));
+    },
+    enabled: !!user?.id,
+    staleTime: staleTimes.standard,
+  });
 
-      setClasses(instructorClasses.map((cls: any) => ({
-        id: cls.id,
-        name: cls.name
-      })));
-    } catch (error) {
-      console.error('Failed to fetch classes:', error);
-    }
-  };
-
-  const fetchStudents = async () => {
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('No token found');
-        return;
-      }
-
-      // Get all enrollments for instructor's classes
+  // Fetch enrollments for instructor's classes
+  const classIds = classes.map((c: InstructorClass) => c.id);
+  
+  const { data: students = [], isLoading: studentsLoading } = useQuery({
+    queryKey: ['instructor-students', ...classIds, classFilter],
+    queryFn: async () => {
       const response = await axios.get(`${API_URL}/enrollments`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
 
-      // Handle paginated response structure
       const enrollmentData = response.data.data;
       const allEnrollments = Array.isArray(enrollmentData) ? enrollmentData : (enrollmentData?.data || []);
-      console.log('All enrollments:', allEnrollments);
       
-      // Filter enrollments for instructor's classes
-      const classIds = classes.map(c => c.id);
-      console.log('Instructor class IDs:', classIds);
-      
+      // Filter enrollments for instructor's classes and approved only
       const instructorEnrollments = allEnrollments.filter((enrollment: any) => {
         const isInstructorClass = classIds.includes(enrollment.classId);
         const isApproved = enrollment.status === 'APPROVED';
-        console.log(`Enrollment ${enrollment.id}: classId=${enrollment.classId}, status=${enrollment.status}, isInstructorClass=${isInstructorClass}, isApproved=${isApproved}`);
         return isInstructorClass && isApproved;
       });
-
-      console.log('Instructor enrollments:', instructorEnrollments);
 
       // Group by student and collect their classes
       const studentMap = new Map<string, Student>();
@@ -148,17 +111,10 @@ export default function InstructorStudentsPage() {
         const studentId = enrollment.student?.id;
         
         if (!studentId || !enrollment.student?.user) {
-          console.warn('Invalid enrollment data:', enrollment);
           return;
         }
         
         if (!studentMap.has(studentId)) {
-          console.log('Adding student to map:', {
-            studentId,
-            userName: `${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`,
-            ward: enrollment.student.user.ward,
-            wardId: enrollment.student.user.wardId
-          });
           studentMap.set(studentId, {
             id: enrollment.student.id,
             user: enrollment.student.user,
@@ -176,24 +132,21 @@ export default function InstructorStudentsPage() {
       });
 
       const studentsArray = Array.from(studentMap.values());
-      console.log('Students array:', studentsArray);
       
       // Filter by selected class if not 'all'
-      let filteredStudents = studentsArray;
       if (classFilter !== 'all') {
-        filteredStudents = studentsArray.filter(student =>
+        return studentsArray.filter(student =>
           student.enrollments.some(e => e.class.id === classFilter)
         );
       }
 
-      console.log('Final filtered students:', filteredStudents);
-      setStudents(filteredStudents);
-    } catch (error) {
-      console.error('Failed to fetch students:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      return studentsArray;
+    },
+    enabled: classIds.length > 0,
+    staleTime: staleTimes.standard,
+  });
+
+  const loading = classesLoading || studentsLoading;
 
   const filteredStudents = students.filter(student => {
     const fullName = `${student.user.firstName} ${student.user.lastName}`.toLowerCase();
@@ -319,71 +272,138 @@ export default function InstructorStudentsPage() {
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Student</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Ward</TableHead>
-                  <TableHead>Enrolled Classes</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* Desktop Table */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Student</TableHead>
+                      <TableHead>Contact</TableHead>
+                      <TableHead>Ward</TableHead>
+                      <TableHead>Enrolled Classes</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredStudents.map((student) => (
+                      <TableRow key={student.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-10 w-10">
+                              <AvatarImage src={student.user.profilePicture} alt={`${student.user.firstName} ${student.user.lastName}`} />
+                              <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                                {student.user.firstName[0]}{student.user.lastName[0]}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-medium">
+                                {student.user.firstName} {student.user.lastName}
+                              </p>
+                              <p className="text-sm text-muted-foreground flex items-center gap-1">
+                                <Mail className="h-3 w-3" />
+                                {student.user.email}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {student.user.phone ? (
+                            <div className="flex items-center gap-1 text-sm">
+                              <Phone className="h-3 w-3 text-muted-foreground" />
+                              {student.user.phone}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">N/A</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {student.user.ward?.name || 'N/A'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            {student.enrollments.map(enrollment => (
+                              <Badge key={enrollment.id} variant="secondary" className="text-xs">
+                                {enrollment.class.name}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="sm">
+                            <Eye className="h-4 w-4 mr-2" />
+                            View Details
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              
+              {/* Mobile Cards */}
+              <div className="md:hidden p-4 space-y-3">
                 {filteredStudents.map((student) => (
-                  <TableRow key={student.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-10 w-10">
-                          <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                            {student.user.firstName[0]}{student.user.lastName[0]}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium">
-                            {student.user.firstName} {student.user.lastName}
-                          </p>
-                          <p className="text-sm text-muted-foreground flex items-center gap-1">
-                            <Mail className="h-3 w-3" />
-                            {student.user.email}
-                          </p>
-                        </div>
+                  <div key={student.id} className="bg-muted/30 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-12 w-12">
+                        <AvatarImage src={student.user.profilePicture} alt={`${student.user.firstName} ${student.user.lastName}`} />
+                        <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                          {student.user.firstName[0]}{student.user.lastName[0]}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">
+                          {student.user.firstName} {student.user.lastName}
+                        </p>
+                        <p className="text-sm text-muted-foreground truncate flex items-center gap-1">
+                          <Mail className="h-3 w-3 shrink-0" />
+                          {student.user.email}
+                        </p>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      {student.user.phone ? (
-                        <div className="flex items-center gap-1 text-sm">
-                          <Phone className="h-3 w-3 text-muted-foreground" />
-                          {student.user.phone}
-                        </div>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">N/A</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {student.user.ward?.name || 'N/A'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-muted-foreground block mb-1">Phone</span>
+                        {student.user.phone ? (
+                          <span className="flex items-center gap-1">
+                            <Phone className="h-3 w-3 text-muted-foreground" />
+                            {student.user.phone}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">N/A</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block mb-1">Ward</span>
+                        <Badge variant="outline" className="text-xs">
+                          {student.user.ward?.name || 'N/A'}
+                        </Badge>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <span className="text-sm text-muted-foreground block mb-2">Enrolled Classes</span>
+                      <div className="flex flex-wrap gap-1">
                         {student.enrollments.map(enrollment => (
                           <Badge key={enrollment.id} variant="secondary" className="text-xs">
                             {enrollment.class.name}
                           </Badge>
                         ))}
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="sm">
-                        <Eye className="h-4 w-4 mr-2" />
-                        View Details
-                      </Button>
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                    
+                    <Button variant="outline" size="sm" className="w-full">
+                      <Eye className="h-4 w-4 mr-2" />
+                      View Details
+                    </Button>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

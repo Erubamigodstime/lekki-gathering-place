@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Check, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import {
@@ -97,6 +97,7 @@ export default function StudentAttendanceCard({
     };
 
     // Render attendance circle
+    // Render attendance circle - simplified round checkbox design
     const renderAttendanceCircle = (date: Date) => {
         const status = getStatusForDate(date);
         const markingKey = date.toISOString();
@@ -107,17 +108,15 @@ export default function StudentAttendanceCard({
         if (isMarking) {
             return (
                 <div className="w-8 h-8 flex items-center justify-center">
-                    <Loader2 className="w-5 h-5 animate-spin text-church-blue" />
+                    <Loader2 className="w-5 h-5 animate-spin text-primary" />
                 </div>
             );
         }
 
         if (status === 'APPROVED') {
             return (
-                <div className="w-8 h-8 rounded-full bg-church-blue flex items-center justify-center">
-                    <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
+                <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
+                    <Check className="w-4 h-4 text-white" strokeWidth={3} />
                 </div>
             );
         }
@@ -128,14 +127,16 @@ export default function StudentAttendanceCard({
                     className="w-8 h-8 rounded-full border-2 border-amber-500 bg-amber-50 flex items-center justify-center"
                     title="Pending approval"
                 >
-                    <div className="w-2 h-2 rounded-full bg-amber-500" />
+                    <Check className="w-4 h-4 text-amber-600" strokeWidth={3} />
                 </div>
             );
         }
 
         if (status === 'REJECTED') {
             return (
-                <div className="w-8 h-8 rounded-full border-2 border-red-400 bg-red-50" title="Rejected" />
+                <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center" title="Rejected">
+                    <XCircle className="w-4 h-4 text-white" />
+                </div>
             );
         }
 
@@ -151,16 +152,16 @@ export default function StudentAttendanceCard({
                     }
                 }}
                 className={cn(
-                    "w-10 h-10 rounded-lg border-2 transition-all flex items-center justify-center",
+                    "w-8 h-8 rounded-full border-2 transition-all flex items-center justify-center",
                     canMark
-                        ? "border-church-blue bg-church-blue/10 hover:bg-church-blue/20 cursor-pointer shadow-md"
+                        ? "border-primary hover:bg-primary/10 cursor-pointer"
                         : "border-gray-300 bg-gray-50 cursor-not-allowed",
                     future && "opacity-40"
                 )}
                 title={canMark ? "Click to mark attendance" : future ? "Future date" : "Past date - cannot mark"}
             >
                 {canMark && (
-                    <span className="text-church-blue font-bold text-xs">✓</span>
+                    <span className="w-2 h-2 rounded-full bg-primary" />
                 )}
             </button>
         );
@@ -168,20 +169,20 @@ export default function StudentAttendanceCard({
 
     if (loading) {
         return (
-            <Card className="shadow-card border-l-4 border-l-church-blue">
+            <Card className="shadow-card border-l-4 border-l-primary">
                 <CardContent className="py-8 flex items-center justify-center">
-                    <Loader2 className="h-6 w-6 animate-spin text-church-blue" />
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </CardContent>
             </Card>
         );
     }
 
     return (
-        <Card className="shadow-card border-l-4 border-l-church-blue">
+        <Card className="shadow-card border-l-4 border-l-primary">
             <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                     <CardTitle className="text-lg font-semibold">{classInfo.name}</CardTitle>
-                    <span className="text-sm font-medium text-church-blue">
+                    <span className="text-sm font-medium text-primary">
                         {stats.percentage}% ({stats.approvedCount}/{stats.totalPastDates})
                     </span>
                 </div>
@@ -207,16 +208,16 @@ export default function StudentAttendanceCard({
                             return (
                                 <div key={idx} className={cn(
                                     "flex flex-col items-center flex-1 py-2 px-1 rounded-lg",
-                                    today && "bg-church-blue/10 ring-2 ring-church-blue"
+                                    today && "bg-primary/10 ring-2 ring-primary"
                                 )}>
                                     <span className={cn(
                                         "text-xs mb-1 whitespace-nowrap",
-                                        today ? "text-church-blue font-bold" : "text-muted-foreground"
+                                        today ? "text-primary font-bold" : "text-muted-foreground"
                                     )}>
                                         {formatAttendanceDate(date)}
                                     </span>
                                     {today && (
-                                        <span className="text-[10px] text-church-blue font-semibold mb-1">TODAY</span>
+                                        <span className="text-[10px] text-primary font-semibold mb-1">TODAY</span>
                                     )}
                                     {renderAttendanceCircle(date)}
                                 </div>

@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Search, Check, X, Clock, Users, Calendar as CalendarIcon, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search, Check, X, Clock, Users, Calendar as CalendarIcon, CheckCircle, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
@@ -32,6 +33,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import axios from 'axios';
+import { getAuthHeaders, staleTimes } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
 
@@ -47,6 +49,7 @@ interface AttendanceRecord {
       firstName: string;
       lastName: string;
       email: string;
+      profilePicture?: string;
     };
   };
   class: {
@@ -63,10 +66,7 @@ interface InstructorClass {
 export default function InstructorAttendancePage() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
-  const [classes, setClasses] = useState<InstructorClass[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -75,28 +75,15 @@ export default function InstructorAttendancePage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchInstructorClasses();
-  }, []);
-
-  useEffect(() => {
-    if (classes.length > 0) {
-      fetchAttendanceRecords();
-    }
-  }, [classes, classFilter, statusFilter]);
-
-  const fetchInstructorClasses = async () => {
-    try {
-      setError(null);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setError('Authentication required. Please log in again.');
-        setLoading(false);
-        return;
-      }
-
+  // Fetch instructor's classes with React Query
+  const { data: classes = [], isLoading: loadingClasses, error: classesError } = useQuery({
+    queryKey: ['instructor', 'classes', user?.id],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return [];
+      
       const response = await axios.get(`${API_URL}/classes`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
         timeout: 15000,
       });
 
@@ -105,30 +92,21 @@ export default function InstructorAttendancePage() {
         cls.instructor?.userId === user?.id
       );
 
-      setClasses(instructorClasses.map((cls: any) => ({
+      return instructorClasses.map((cls: any) => ({
         id: cls.id,
         name: cls.name
-      })));
-    } catch (error: any) {
-      console.error('Failed to fetch classes:', error);
-      const errorMessage = axios.isAxiosError(error)
-        ? error.response?.data?.message || 'Failed to load classes. Please try again.'
-        : 'An unexpected error occurred. Please refresh the page.';
-      setError(errorMessage);
-      setClasses([]);
-    }
-  };
+      })) as InstructorClass[];
+    },
+    staleTime: staleTimes.static,
+    enabled: !!user?.id,
+  });
 
-  const fetchAttendanceRecords = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setError('Authentication required. Please log in again.');
-        setLoading(false);
-        return;
-      }
+  // Fetch attendance records with React Query (depends on classes)
+  const { data: attendanceRecords = [], isLoading: loadingAttendance, error: attendanceError, refetch: refetchAttendance } = useQuery({
+    queryKey: ['instructor', 'attendance', classes.map(c => c.id), statusFilter],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers || classes.length === 0) return [];
 
       const params: any = {};
       if (statusFilter !== 'all') {
@@ -136,12 +114,12 @@ export default function InstructorAttendancePage() {
       }
 
       const response = await axios.get(`${API_URL}/attendance`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
         params,
         timeout: 15000,
       });
 
-      // Handle paginated response: response.data.data is { data: [...], pagination: {...} }
+      // Handle paginated response
       const paginatedData = response.data.data || {};
       const allAttendance = paginatedData.data || paginatedData || [];
       
@@ -153,17 +131,21 @@ export default function InstructorAttendancePage() {
           )
         : [];
 
-      setAttendanceRecords(instructorAttendance);
-    } catch (error: any) {
-      console.error('Failed to fetch attendance:', error);
-      const errorMessage = axios.isAxiosError(error)
-        ? error.response?.data?.message || 'Failed to load attendance records. Please try again.'
-        : 'An unexpected error occurred. Please refresh the page.';
-      setError(errorMessage);
-      setAttendanceRecords([]);
-    } finally {
-      setLoading(false);
-    }
+      return instructorAttendance as AttendanceRecord[];
+    },
+    staleTime: staleTimes.dynamic,
+    enabled: classes.length > 0,
+  });
+
+  const loading = loadingClasses || loadingAttendance;
+  const error = classesError || attendanceError 
+    ? (classesError as Error)?.message || (attendanceError as Error)?.message || 'An error occurred'
+    : null;
+
+  // Invalidate and refetch after mutations
+  const invalidateAttendance = () => {
+    queryClient.invalidateQueries({ queryKey: ['instructor', 'attendance'] });
+    queryClient.invalidateQueries({ queryKey: ['attendance'] });
   };
 
   const handleApprove = async (recordId: string) => {
@@ -172,23 +154,29 @@ export default function InstructorAttendancePage() {
       const token = localStorage.getItem('token');
       if (!token) return;
 
+      // Optimistic update
+      queryClient.setQueryData<AttendanceRecord[]>(
+        ['instructor', 'attendance', classes.map(c => c.id), statusFilter],
+        (old = []) => old.map(r => r.id === recordId ? { ...r, status: 'APPROVED' } : r)
+      );
+
       await axios.patch(
         `${API_URL}/attendance/${recordId}/approve`,
         { status: 'APPROVED' },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Update the record status in the list
-      setAttendanceRecords(prev => 
-        prev.map(r => r.id === recordId ? { ...r, status: 'APPROVED' } : r)
-      );
-
       toast({
         title: 'Success',
         description: 'Attendance approved successfully',
       });
+      
+      // Invalidate to ensure fresh data
+      invalidateAttendance();
     } catch (error: any) {
       console.error('Failed to approve attendance:', error);
+      // Revert on error
+      invalidateAttendance();
       toast({
         title: 'Error',
         description: error.response?.data?.message || 'Failed to approve attendance',
@@ -214,6 +202,14 @@ export default function InstructorAttendancePage() {
       const token = localStorage.getItem('token');
       if (!token) return;
 
+      // Optimistic update
+      queryClient.setQueryData<AttendanceRecord[]>(
+        ['instructor', 'attendance', classes.map(c => c.id), statusFilter],
+        (old = []) => old.map(r => r.id === selectedRecord.id 
+          ? { ...r, status: 'REJECTED', rejectionReason } 
+          : r)
+      );
+
       await axios.patch(
         `${API_URL}/attendance/${selectedRecord.id}/approve`,
         { 
@@ -221,13 +217,6 @@ export default function InstructorAttendancePage() {
           rejectionReason: rejectionReason
         },
         { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      // Update the record status in the list
-      setAttendanceRecords(prev => 
-        prev.map(r => r.id === selectedRecord.id 
-          ? { ...r, status: 'REJECTED', rejectionReason } 
-          : r)
       );
 
       toast({
@@ -238,8 +227,13 @@ export default function InstructorAttendancePage() {
       setRejectDialogOpen(false);
       setSelectedRecord(null);
       setRejectionReason('');
+      
+      // Invalidate to ensure fresh data
+      invalidateAttendance();
     } catch (error: any) {
       console.error('Failed to reject attendance:', error);
+      // Revert on error
+      invalidateAttendance();
       toast({
         title: 'Error',
         description: error.response?.data?.message || 'Failed to reject attendance',
@@ -285,14 +279,6 @@ export default function InstructorAttendancePage() {
     });
   };
 
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-  };
-
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -323,8 +309,7 @@ export default function InstructorAttendancePage() {
                   size="sm"
                   className="border-red-600 text-red-600 hover:bg-red-100 dark:border-red-400 dark:text-red-400"
                   onClick={() => {
-                    setError(null);
-                    fetchInstructorClasses();
+                    queryClient.invalidateQueries({ queryKey: ['instructor'] });
                   }}
                 >
                   <RefreshCw className="h-4 w-4 mr-2" />
@@ -451,114 +436,206 @@ export default function InstructorAttendancePage() {
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Student</TableHead>
-                  <TableHead>Class</TableHead>
-                  <TableHead>Date & Time</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Notes</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* Desktop Table */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Student</TableHead>
+                      <TableHead>Class</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Notes</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRecords.map((record) => (
+                      <TableRow key={record.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-9 w-9">
+                              <AvatarImage src={record.student.user.profilePicture} alt={`${record.student.user.firstName} ${record.student.user.lastName}`} />
+                              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                                {record.student.user.firstName[0]}{record.student.user.lastName[0]}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-medium text-sm">
+                                {record.student.user.firstName} {record.student.user.lastName}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {record.student.user.email}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="font-medium">
+                            {record.class.name}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm font-medium">{formatDate(record.date)}</span>
+                        </TableCell>
+                        <TableCell>
+                          {record.status === 'PENDING' && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300">
+                              <Clock className="h-3 w-3 mr-1" />
+                              Pending
+                            </Badge>
+                          )}
+                          {record.status === 'APPROVED' && (
+                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
+                              <Check className="h-3 w-3 mr-1" />
+                              Approved
+                            </Badge>
+                          )}
+                          {record.status === 'REJECTED' && (
+                            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">
+                              <X className="h-3 w-3 mr-1" />
+                              Rejected
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {record.rejectionReason ? (
+                            <p className="text-sm text-red-600 max-w-xs truncate">
+                              {record.rejectionReason}
+                            </p>
+                          ) : record.notes ? (
+                            <p className="text-sm text-muted-foreground max-w-xs truncate">
+                              {record.notes}
+                            </p>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">No notes</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {record.status === 'PENDING' ? (
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="default"
+                                className="bg-green-600 hover:bg-green-700"
+                                onClick={() => handleApprove(record.id)}
+                                disabled={processingId === record.id}
+                              >
+                                {processingId === record.id ? (
+                                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                ) : (
+                                  <Check className="h-4 w-4 mr-1" />
+                                )}
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => openRejectDialog(record)}
+                                disabled={processingId === record.id}
+                              >
+                                <X className="h-4 w-4 mr-1" />
+                                Reject
+                              </Button>
+                            </div>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">
+                              {record.status === 'APPROVED' ? 'Completed' : 'Processed'}
+                            </Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              
+              {/* Mobile Cards */}
+              <div className="md:hidden p-4 space-y-3">
                 {filteredRecords.map((record) => (
-                  <TableRow key={record.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Avatar className="h-9 w-9">
-                          <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-                            {record.student.user.firstName[0]}{record.student.user.lastName[0]}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium text-sm">
-                            {record.student.user.firstName} {record.student.user.lastName}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {record.student.user.email}
-                          </p>
-                        </div>
+                  <div key={record.id} className="bg-muted/30 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-11 w-11">
+                        <AvatarImage src={record.student.user.profilePicture} alt={`${record.student.user.firstName} ${record.student.user.lastName}`} />
+                        <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                          {record.student.user.firstName[0]}{record.student.user.lastName[0]}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">
+                          {record.student.user.firstName} {record.student.user.lastName}
+                        </p>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {record.student.user.email}
+                        </p>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="font-medium">
-                        {record.class.name}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium">{formatDate(record.date)}</span>
-                        <span className="text-xs text-muted-foreground">{formatTime(record.date)}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
                       {record.status === 'PENDING' && (
-                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300">
+                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300 shrink-0">
                           <Clock className="h-3 w-3 mr-1" />
                           Pending
                         </Badge>
                       )}
                       {record.status === 'APPROVED' && (
-                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 shrink-0">
                           <Check className="h-3 w-3 mr-1" />
                           Approved
                         </Badge>
                       )}
                       {record.status === 'REJECTED' && (
-                        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">
+                        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300 shrink-0">
                           <X className="h-3 w-3 mr-1" />
                           Rejected
                         </Badge>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      {record.rejectionReason ? (
-                        <p className="text-sm text-red-600 max-w-xs truncate">
-                          {record.rejectionReason}
-                        </p>
-                      ) : record.notes ? (
-                        <p className="text-sm text-muted-foreground max-w-xs truncate">
-                          {record.notes}
-                        </p>
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">No notes</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {record.status === 'PENDING' ? (
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="default"
-                            className="bg-green-600 hover:bg-green-700"
-                            onClick={() => handleApprove(record.id)}
-                            disabled={processingId === record.id}
-                          >
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-2 items-center text-sm">
+                      <Badge variant="outline" className="font-medium">
+                        {record.class.name}
+                      </Badge>
+                      <span className="text-muted-foreground">•</span>
+                      <span className="text-muted-foreground">{formatDate(record.date)}</span>
+                    </div>
+                    
+                    {(record.notes || record.rejectionReason) && (
+                      <p className={`text-sm ${record.rejectionReason ? 'text-red-600' : 'text-muted-foreground'}`}>
+                        {record.rejectionReason || record.notes}
+                      </p>
+                    )}
+                    
+                    {record.status === 'PENDING' && (
+                      <div className="flex gap-2 pt-2 border-t border-border/50">
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="flex-1 bg-green-600 hover:bg-green-700"
+                          onClick={() => handleApprove(record.id)}
+                          disabled={processingId === record.id}
+                        >
+                          {processingId === record.id ? (
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          ) : (
                             <Check className="h-4 w-4 mr-1" />
-                            Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => openRejectDialog(record)}
-                            disabled={processingId === record.id}
-                          >
-                            <X className="h-4 w-4 mr-1" />
-                            Reject
-                          </Button>
-                        </div>
-                      ) : (
-                        <Badge variant="secondary" className="text-xs">
-                          {record.status === 'APPROVED' ? 'Completed' : 'Processed'}
-                        </Badge>
-                      )}
-                    </TableCell>
-                  </TableRow>
+                          )}
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="flex-1"
+                          onClick={() => openRejectDialog(record)}
+                          disabled={processingId === record.id}
+                        >
+                          <X className="h-4 w-4 mr-1" />
+                          Reject
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

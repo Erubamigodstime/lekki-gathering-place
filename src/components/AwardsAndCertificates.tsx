@@ -8,7 +8,7 @@ const achievements = [
   {
     icon: <Award className="w-8 h-8" />,
     title: "Course Completion",
-    description: "Digital certificates for finished courses",
+    description: " A hard copy and Digital certificates for finished courses",
     color: "from-blue-600 to-blue-700",
   },
   {

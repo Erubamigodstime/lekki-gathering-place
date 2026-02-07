@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Users, Mail, Search, Loader2, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import axios from 'axios';
+import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
@@ -39,26 +41,18 @@ interface InstructorPeoplePageProps {
 }
 
 export default function InstructorPeoplePage({ classId }: InstructorPeoplePageProps) {
-  const [students, setStudents] = useState<Student[]>([]);
-  const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  useEffect(() => {
-    fetchStudents();
-  }, [classId]);
-
-  useEffect(() => {
-    filterStudents();
-  }, [students, searchQuery]);
-
-  const fetchStudents = async () => {
-    try {
-      const token = localStorage.getItem('token');
+  // Fetch students with grades using React Query
+  const { data: students = [], isLoading } = useQuery({
+    queryKey: queryKeys.classEnrollments(classId, 'APPROVED'),
+    queryFn: async (): Promise<Student[]> => {
+      const headers = getAuthHeaders();
+      if (!headers) return [];
       
       // Fetch enrollments for this specific class
       const enrollResponse = await axios.get(`${API_URL}/enrollments/class/${classId}?status=APPROVED`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
       
       // Handle paginated response structure
@@ -74,7 +68,7 @@ export default function InstructorPeoplePage({ classId }: InstructorPeoplePagePr
             const studentRecordId = e.studentId || e.student?.id;
             const gradeResponse = await axios.get(
               `${API_URL}/grades/student/${studentRecordId}/class/${classId}`,
-              { headers: { Authorization: `Bearer ${token}` } }
+              { headers }
             );
             const gradeData = gradeResponse.data.data;
             // Backend returns {totalPoints, earnedPoints, percentage, letterGrade}
@@ -104,34 +98,23 @@ export default function InstructorPeoplePage({ classId }: InstructorPeoplePagePr
         })
       );
       
-      setStudents(studentsWithGrades);
-    } catch (error) {
-      console.error('Failed to fetch students:', error);
-      setStudents([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+      return studentsWithGrades;
+    },
+    staleTime: staleTimes.dynamic,
+    enabled: !!classId,
+  });
 
-  const filterStudents = () => {
-    try {
-      let filtered = students;
+  // Filter students based on search query using useMemo
+  const filteredStudents = useMemo(() => {
+    if (!searchQuery) return students;
 
-      if (searchQuery) {
-        filtered = filtered.filter(s => {
-          const fullName = `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.toLowerCase();
-          const email = (s.user?.email || '').toLowerCase();
-          const query = searchQuery.toLowerCase();
-          return fullName.includes(query) || email.includes(query);
-        });
-      }
-
-      setFilteredStudents(filtered);
-    } catch (error) {
-      console.error('Error filtering students:', error);
-      setFilteredStudents([]);
-    }
-  };
+    return students.filter((s) => {
+      const fullName = `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.toLowerCase();
+      const email = (s.user?.email || '').toLowerCase();
+      const query = searchQuery.toLowerCase();
+      return fullName.includes(query) || email.includes(query);
+    });
+  }, [students, searchQuery]);
 
   const getInitials = (firstName: string, lastName: string) => {
     return `${firstName[0] || ''}${lastName[0] || ''}`.toUpperCase();
@@ -149,7 +132,7 @@ export default function InstructorPeoplePage({ classId }: InstructorPeoplePagePr
     ? students.reduce((sum, s) => sum + (s.currentGrade || 0), 0) / students.filter(s => s.currentGrade).length
     : 0;
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="flex flex-col items-center gap-4">

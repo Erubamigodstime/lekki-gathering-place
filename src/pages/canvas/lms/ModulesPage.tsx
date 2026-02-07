@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Circle, ChevronDown, ChevronRight, FileText, ClipboardList, Clock, CheckCheck, File, FileVideo, Link as LinkIcon, Download, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import axios from 'axios';
+import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
@@ -56,285 +58,183 @@ interface ModulesPageProps {
   classId: string;
 }
 
-// Enterprise caching helpers
-const CACHE_KEYS = {
-  modules: (classId: string) => `student-modules-${classId}`,
-  classData: (classId: string) => `student-class-data-${classId}`,
-};
-
-const getCachedData = (key: string) => {
-  try {
-    const cached = sessionStorage.getItem(key);
-    if (cached) {
-      const { data, timestamp } = JSON.parse(cached);
-      // Cache valid for 5 minutes
-      if (Date.now() - timestamp < 5 * 60 * 1000) {
-        return data;
-      }
-    }
-  } catch (error) {
-    console.error('Cache read error:', error);
-  }
-  return null;
-};
-
-const setCachedData = (key: string, data: any) => {
-  try {
-    const serialized = JSON.stringify({ data, timestamp: Date.now() });
-    // Check if data is too large (>4.5MB as safety margin for 5MB limit)
-    if (serialized.length > 4.5 * 1024 * 1024) {
-      console.warn('Cache data too large, skipping cache');
-      return;
-    }
-    sessionStorage.setItem(key, serialized);
-  } catch (error: any) {
-    // Handle quota exceeded error
-    if (error.name === 'QuotaExceededError') {
-      console.warn('SessionStorage quota exceeded, clearing old caches');
-      // Clear old module caches
-      Object.keys(sessionStorage).forEach(k => {
-        if (k.startsWith('student-modules-') || k.startsWith('instructor-modules-')) {
-          sessionStorage.removeItem(k);
-        }
-      });
-      // Retry once
-      try {
-        sessionStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
-      } catch (retryError) {
-        console.error('Cache write failed after cleanup:', retryError);
-      }
-    } else {
-      console.error('Cache write error:', error);
-    }
-  }
-};
-
-const invalidateModulesCache = (classId: string) => {
-  try {
-    sessionStorage.removeItem(CACHE_KEYS.modules(classId));
-    sessionStorage.removeItem(CACHE_KEYS.classData(classId));
-    // Set a flag to trigger storage event for other tabs
-    sessionStorage.setItem(`cache-invalidated-${classId}`, Date.now().toString());
-    setTimeout(() => sessionStorage.removeItem(`cache-invalidated-${classId}`), 100);
-  } catch (error) {
-    console.error('Cache invalidation error:', error);
-  }
-};
-
 export default function ModulesPage({ classId }: ModulesPageProps) {
-  const [modules, setModules] = useState<WeekModule[]>([]);
+  const queryClient = useQueryClient();
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set([1]));
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [classSchedule, setClassSchedule] = useState<any>(null);
-  const inMemoryCache = useRef<{ modules?: WeekModule[]; classData?: any }>({});
 
-  useEffect(() => {
-    fetchModules();
+  // Fetch class details
+  const { data: classData, isLoading: classLoading } = useQuery({
+    queryKey: queryKeys.classById(classId),
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return null;
+      const response = await axios.get(`${API_URL}/classes/${classId}`, { headers });
+      return response.data.data;
+    },
+    staleTime: staleTimes.static,
+  });
 
-    // Listen for storage events from other tabs (instructor changes)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key && (e.key.startsWith('student-modules-') || e.key.startsWith('instructor-modules-'))) {
-        // Cache was invalidated in another tab, refetch
-        fetchModules(true);
-      }
-    };
+  // Fetch lessons for the class
+  const { data: lessonsData = [], isLoading: lessonsLoading } = useQuery({
+    queryKey: queryKeys.lessons(classId, false),
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return [];
+      const response = await axios.get(`${API_URL}/lessons/class/${classId}`, { headers });
+      return response.data.data || [];
+    },
+    staleTime: staleTimes.standard,
+  });
 
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      // Clear in-memory cache on unmount
-      inMemoryCache.current = {};
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classId]);
-
-  const fetchModules = async (silent = false) => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('No auth token found');
-        setLoading(false);
-        return;
-      }
-
-      // Show cached data instantly if available
-      const cachedModules = getCachedData(CACHE_KEYS.modules(classId));
-      const cachedClassData = getCachedData(CACHE_KEYS.classData(classId));
-      
-      if (cachedModules && cachedClassData && !silent) {
-        setModules(cachedModules);
-        setClassSchedule(cachedClassData.schedule);
-        inMemoryCache.current = { modules: cachedModules, classData: cachedClassData };
-        setLoading(false);
-        // Continue to fetch fresh data in background
-      }
-
-      if (!silent) setLoading(true);
-      
-      // Fetch class details with schedule
-      const classResponse = await axios.get(`${API_URL}/classes/${classId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const classData = classResponse.data.data;
-      const schedule = classData.schedule?.weeklyLessons || [];
-      const totalWeeks = classData.totalWeeks || 12;
-      setClassSchedule(classData.schedule);
-
-      // Fetch ONLY published lessons for students (backend filters by default)
-      const lessonsResponse = await axios.get(`${API_URL}/lessons/class/${classId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => ({ data: { data: [] } }));
-
-      // Fetch student's progress
+  // Fetch student's progress
+  const { data: progressData = [], isLoading: progressLoading } = useQuery({
+    queryKey: ['week-progress', classId],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return [];
       const userId = localStorage.getItem('userId');
-      const progressResponse = await axios.get(
+      const response = await axios.get(
         `${API_URL}/week-progress?classId=${classId}&studentId=${userId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      ).catch(() => ({ data: { data: [] } }));
+        { headers }
+      );
+      return response.data.data || [];
+    },
+    staleTime: staleTimes.dynamic,
+  });
 
-      const lessonsData = lessonsResponse.data.data || [];
-      const progressData = progressResponse.data.data || [];
-
-      console.log('📚 Student Modules - Fetched Data:', {
-        totalWeeks,
-        publishedLessons: lessonsData.length,
-        lessonsData,
-        progressData
-      });
-
-      // Build modules structure
-      const modulesData: WeekModule[] = [];
-
-      for (let week = 1; week <= totalWeeks; week++) {
-        const weekSchedule = schedule.find((s: any) => s.week === week);
-        // Use weekNumber field (correct field name from schema)
-        const weekLessons = lessonsData.filter((l: any) => l.weekNumber === week);
-        const weekProgress = progressData.find((p: any) => p.weekNumber === week);
-
-        // Determine completion status
-        let completionStatus: CompletionStatus = 'not_started';
-        if (weekProgress) {
-          if (weekProgress.instructorApproved) {
-            completionStatus = 'approved';
-          } else if (weekProgress.completed) {
-            completionStatus = 'pending';
-          }
-        }
-
-        // Only use instructor-created published lessons (backend already filters)
-        let lessons: Lesson[] = [];
-        
-        if (weekLessons.length > 0) {
-          // Fetch materials for all lessons in parallel
-          lessons = await Promise.all(weekLessons.map(async (lesson: any) => {
-            let courseMaterials: CourseMaterial[] = [];
-            try {
-              const materialsResponse = await axios.get(
-                `${API_URL}/course-materials/lesson/${lesson.id}`,
-                { headers: { Authorization: `Bearer ${token}` } }
-              );
-              courseMaterials = materialsResponse.data.data || [];
-            } catch (error) {
-              console.error(`Failed to fetch materials for lesson ${lesson.id}:`, error);
-            }
-
-            return {
-              id: lesson.id,
-              title: lesson.title,
-              weekNumber: lesson.weekNumber, // Correct field name
-              description: lesson.description,
-              content: lesson.description, // Use description as content
-              isPublished: lesson.isPublished, // Correct field name
-              completionStatus,
-              courseMaterials,
-            };
-          }));
-        } else if (weekSchedule) {
-          // Fallback to schedule data when no published lessons exist
-          lessons = [{
-            id: `schedule-${classId}-week-${week}`,
-            title: weekSchedule.title || `Week ${week} Lesson`,
-            weekNumber: week,
-            isPublished: false,
-            content: `
-              <div class="space-y-4">
-                ${weekSchedule.objectives ? `
-                  <div class="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-500">
-                    <h3 class="text-lg font-semibold text-blue-900 mb-3 flex items-center">
-                      <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path>
-                        <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"></path>
-                      </svg>
-                      Learning Objectives
-                    </h3>
-                    <ul class="space-y-2">
-                      ${weekSchedule.objectives.map((obj: string) => `
-                        <li class="flex items-start">
-                          <span class="text-blue-500 mr-2">✓</span>
-                          <span class="text-gray-700">${obj}</span>
-                        </li>
-                      `).join('')}
-                    </ul>
-                  </div>
-                ` : ''}
-                ${weekSchedule.activities ? `
-                  <div class="bg-green-50 p-4 rounded-lg border-l-4 border-green-500">
-                    <h3 class="text-lg font-semibold text-green-900 mb-3 flex items-center">
-                      <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
-                      </svg>
-                      Activities
-                    </h3>
-                    <ul class="space-y-2">
-                      ${weekSchedule.activities.map((act: string) => `
-                        <li class="flex items-start">
-                          <span class="text-green-500 mr-2">→</span>
-                          <span class="text-gray-700">${act}</span>
-                        </li>
-                      `).join('')}
-                    </ul>
-                  </div>
-                ` : ''}
-              </div>
-            `,
-            completionStatus,
-          }];
-        }
-
-        modulesData.push({
-          week,
-          title: weekSchedule?.title || `Week ${week}`,
-          lessons,
-          assignments: [],
-          completionStatus,
-        });
-      }
-
-      setModules(modulesData);
-      inMemoryCache.current = { modules: modulesData, classData };
+  // Fetch materials for all lessons
+  const lessonIds = lessonsData.map((l: any) => l.id);
+  const { data: materialsMap = {} } = useQuery({
+    queryKey: ['lesson-materials', classId, lessonIds],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers || lessonIds.length === 0) return {};
       
-      // Cache for instant loading next time
-      setCachedData(CACHE_KEYS.modules(classId), modulesData);
-      setCachedData(CACHE_KEYS.classData(classId), classData);
+      const materialsPromises = lessonIds.map(async (lessonId: string) => {
+        try {
+          const response = await axios.get(
+            `${API_URL}/course-materials/lesson/${lessonId}`,
+            { headers }
+          );
+          return { lessonId, materials: response.data.data || [] };
+        } catch {
+          return { lessonId, materials: [] };
+        }
+      });
+      
+      const results = await Promise.all(materialsPromises);
+      return results.reduce((acc, { lessonId, materials }) => {
+        acc[lessonId] = materials;
+        return acc;
+      }, {} as Record<string, CourseMaterial[]>);
+    },
+    enabled: lessonIds.length > 0,
+    staleTime: staleTimes.standard,
+  });
 
-      console.log('✅ Student Modules Built:', modulesData.length, 'weeks');
-    } catch (error: any) {
-      console.error('❌ Failed to fetch modules:', error);
-      // Don't clear existing data on error if we have cached data
-      if (!inMemoryCache.current.modules) {
-        setModules([]);
+  const loading = classLoading || lessonsLoading || progressLoading;
+  const classSchedule = classData?.schedule;
+
+  // Build modules from the fetched data
+  const modules = useMemo(() => {
+    if (!classData) return [];
+    
+    const schedule = classData.schedule?.weeklyLessons || [];
+    const totalWeeks = classData.totalWeeks || 12;
+    const modulesData: WeekModule[] = [];
+
+    for (let week = 1; week <= totalWeeks; week++) {
+      const weekSchedule = schedule.find((s: any) => s.week === week);
+      const weekLessons = lessonsData.filter((l: any) => l.weekNumber === week);
+      const weekProgress = progressData.find((p: any) => p.weekNumber === week);
+
+      // Determine completion status
+      let completionStatus: CompletionStatus = 'not_started';
+      if (weekProgress) {
+        if (weekProgress.instructorApproved) {
+          completionStatus = 'approved';
+        } else if (weekProgress.completed) {
+          completionStatus = 'pending';
+        }
       }
-      // Show user-friendly error message
-      if (error.response?.status === 401) {
-        console.error('Authentication error - user may need to log in again');
+
+      let lessons: Lesson[] = [];
+      
+      if (weekLessons.length > 0) {
+        lessons = weekLessons.map((lesson: any) => ({
+          id: lesson.id,
+          title: lesson.title,
+          weekNumber: lesson.weekNumber,
+          description: lesson.description,
+          content: lesson.description,
+          isPublished: lesson.isPublished,
+          completionStatus,
+          courseMaterials: materialsMap[lesson.id] || [],
+        }));
+      } else if (weekSchedule) {
+        // Fallback to schedule data when no published lessons exist
+        lessons = [{
+          id: `schedule-${classId}-week-${week}`,
+          title: weekSchedule.title || `Week ${week} Lesson`,
+          weekNumber: week,
+          isPublished: false,
+          content: `
+            <div class="space-y-4">
+              ${weekSchedule.objectives ? `
+                <div class="bg-blue-50 p-4 rounded-lg border-l-4 border-blue-500">
+                  <h3 class="text-lg font-semibold text-blue-900 mb-3 flex items-center">
+                    <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path>
+                      <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"></path>
+                    </svg>
+                    Learning Objectives
+                  </h3>
+                  <ul class="space-y-2">
+                    ${weekSchedule.objectives.map((obj: string) => `
+                      <li class="flex items-start">
+                        <span class="text-blue-500 mr-2">✓</span>
+                        <span class="text-gray-700">${obj}</span>
+                      </li>
+                    `).join('')}
+                  </ul>
+                </div>
+              ` : ''}
+              ${weekSchedule.activities ? `
+                <div class="bg-green-50 p-4 rounded-lg border-l-4 border-green-500">
+                  <h3 class="text-lg font-semibold text-green-900 mb-3 flex items-center">
+                    <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
+                    </svg>
+                    Activities
+                  </h3>
+                  <ul class="space-y-2">
+                    ${weekSchedule.activities.map((act: string) => `
+                      <li class="flex items-start">
+                        <span class="text-green-500 mr-2">→</span>
+                        <span class="text-gray-700">${act}</span>
+                      </li>
+                    `).join('')}
+                  </ul>
+                </div>
+              ` : ''}
+            </div>
+          `,
+          completionStatus,
+        }];
       }
-    } finally {
-      setLoading(false);
+
+      modulesData.push({
+        week,
+        title: weekSchedule?.title || `Week ${week}`,
+        lessons,
+        assignments: [],
+        completionStatus,
+      });
     }
-  };
+
+    return modulesData;
+  }, [classData, lessonsData, progressData, materialsMap, classId]);
 
   const toggleWeek = (week: number) => {
     setExpandedWeeks((prev) => {
@@ -350,25 +250,8 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
 
   const markWeekComplete = async (week: number) => {
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       const userId = localStorage.getItem('userId');
-
-      // Optimistic UI update
-      setModules((prev) =>
-        prev.map((module) => {
-          if (module.week === week) {
-            return {
-              ...module,
-              completionStatus: 'pending' as CompletionStatus,
-              lessons: module.lessons.map(lesson => ({
-                ...lesson,
-                completionStatus: 'pending' as CompletionStatus
-              }))
-            };
-          }
-          return module;
-        })
-      );
 
       await axios.post(
         `${API_URL}/week-progress`,
@@ -377,15 +260,13 @@ export default function ModulesPage({ classId }: ModulesPageProps) {
           studentId: userId,
           weekNumber: week,
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers }
       );
 
-      // Refresh to get server state
-      fetchModules(true);
+      // Invalidate progress query to refetch
+      queryClient.invalidateQueries({ queryKey: ['week-progress', classId] });
     } catch (error) {
       console.error('Failed to mark week complete:', error);
-      // Revert on error
-      fetchModules(true);
     }
   };
 

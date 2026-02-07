@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { 
   Plus, 
   ChevronDown, 
@@ -42,76 +43,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
-
-// Enterprise caching helpers
-const CACHE_KEYS = {
-  modules: (classId: string) => `instructor-modules-${classId}`,
-  classData: (classId: string) => `instructor-class-data-${classId}`,
-};
-
-const getCachedData = (key: string) => {
-  try {
-    const cached = sessionStorage.getItem(key);
-    if (cached) {
-      const { data, timestamp } = JSON.parse(cached);
-      // Cache valid for 5 minutes
-      if (Date.now() - timestamp < 5 * 60 * 1000) {
-        return data;
-      }
-    }
-  } catch (error) {
-    console.error('Cache read error:', error);
-  }
-  return null;
-};
-
-const setCachedData = (key: string, data: any) => {
-  try {
-    const serialized = JSON.stringify({ data, timestamp: Date.now() });
-    // Check if data is too large (>4.5MB as safety margin for 5MB limit)
-    if (serialized.length > 4.5 * 1024 * 1024) {
-      console.warn('Cache data too large, skipping cache');
-      return;
-    }
-    sessionStorage.setItem(key, serialized);
-  } catch (error: any) {
-    // Handle quota exceeded error
-    if (error.name === 'QuotaExceededError') {
-      console.warn('SessionStorage quota exceeded, clearing old caches');
-      // Clear old module caches
-      Object.keys(sessionStorage).forEach(k => {
-        if (k.startsWith('student-modules-') || k.startsWith('instructor-modules-')) {
-          sessionStorage.removeItem(k);
-        }
-      });
-      // Retry once
-      try {
-        sessionStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
-      } catch (retryError) {
-        console.error('Cache write failed after cleanup:', retryError);
-      }
-    } else {
-      console.error('Cache write error:', error);
-    }
-  }
-};
-
-const invalidateModulesCache = (classId: string) => {
-  try {
-    sessionStorage.removeItem(CACHE_KEYS.modules(classId));
-    sessionStorage.removeItem(CACHE_KEYS.classData(classId));
-    // Also invalidate student cache when instructor makes changes
-    sessionStorage.removeItem(`student-modules-${classId}`);
-    sessionStorage.removeItem(`student-class-data-${classId}`);
-    // Trigger storage event for cross-tab sync
-    sessionStorage.setItem(`cache-invalidated-${classId}`, Date.now().toString());
-    setTimeout(() => sessionStorage.removeItem(`cache-invalidated-${classId}`), 100);
-  } catch (error) {
-    console.error('Cache invalidation error:', error);
-  }
-};
 
 interface Lesson {
   id: string;
@@ -163,10 +97,8 @@ interface InstructorModulesPageProps {
 }
 
 export default function InstructorModulesPage({ classId, onPendingChange }: InstructorModulesPageProps) {
-  const [modules, setModules] = useState<WeekModule[]>([]);
-  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const queryClient = useQueryClient();
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set([1]));
-  const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingLesson, setEditingLesson] = useState<Lesson | null>(null);
   const [activeTab, setActiveTab] = useState<'content' | 'approvals'>('content');
@@ -191,31 +123,73 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
   const [publishingLesson, setPublishingLesson] = useState<string | null>(null);
   const [deletingMaterial, setDeletingMaterial] = useState<string | null>(null);
 
-  const [classData, setClassData] = useState<any>(null);
-  const inMemoryCache = useRef<{ modules?: WeekModule[]; classData?: any }>({});
+  // Fetch class data using React Query
+  const { data: classData } = useQuery({
+    queryKey: queryKeys.classById(classId),
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return null;
+      const response = await axios.get(`${API_URL}/classes/${classId}`, { headers });
+      return response.data.data;
+    },
+    staleTime: staleTimes.static,
+    enabled: !!classId,
+  });
 
-  useEffect(() => {
-    fetchClassData();
-    fetchModules();
-    fetchPendingApprovals();
+  // Fetch lessons using React Query
+  const { data: lessonsData = [], isLoading: lessonsLoading } = useQuery({
+    queryKey: queryKeys.lessons(classId, true), // includeUnpublished=true for instructor
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return [];
+      const response = await axios.get(`${API_URL}/lessons/class/${classId}?includeUnpublished=true`, { headers });
+      return response.data.data || [];
+    },
+    staleTime: staleTimes.standard,
+    enabled: !!classId,
+  });
 
-    // Listen for storage events for cross-tab cache sync
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key && (e.key.startsWith('instructor-modules-') || e.key.startsWith('student-modules-') || e.key?.startsWith('cache-invalidated-'))) {
-        // Cache was modified/invalidated, refetch silently
-        fetchModules(true);
-      }
-    };
+  // Fetch pending approvals using React Query
+  const { data: pendingApprovals = [], isLoading: approvalsLoading } = useQuery({
+    queryKey: ['week-progress', 'pending', classId],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return [];
+      const response = await axios.get(
+        `${API_URL}/week-progress/pending?classId=${classId}`,
+        { headers }
+      );
+      return response.data.data || [];
+    },
+    staleTime: staleTimes.dynamic,
+    enabled: !!classId,
+  });
 
-    window.addEventListener('storage', handleStorageChange);
+  // Build modules from lessons and class data using useMemo
+  const modules = useMemo((): WeekModule[] => {
+    const totalWeeks = classData?.totalWeeks || 10;
+    const weeklySchedule = classData?.schedule?.weeklyLessons || [];
+    
+    const modulesMap = new Map<number, WeekModule>();
+    
+    for (let week = 1; week <= totalWeeks; week++) {
+      const weekLessons = lessonsData.filter((l: any) => l.weekNumber === week);
+      const publishedCount = weekLessons.filter((l: any) => l.isPublished).length;
+      const scheduleData = weeklySchedule.find((s: any) => s.week === week);
+      
+      modulesMap.set(week, {
+        week,
+        title: scheduleData?.title || `Week ${week}`,
+        lessons: weekLessons,
+        publishedCount,
+        totalLessons: weekLessons.length,
+      });
+    }
 
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      // Clear in-memory cache on unmount
-      inMemoryCache.current = {};
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classId]);
+    return Array.from(modulesMap.values());
+  }, [lessonsData, classData]);
+
+  const loading = lessonsLoading || approvalsLoading;
 
   useEffect(() => {
     if (onPendingChange) {
@@ -223,116 +197,12 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
     }
   }, [pendingApprovals, onPendingChange]);
 
-  const fetchClassData = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/classes/${classId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setClassData(response.data.data);
-    } catch (error) {
-      console.error('Failed to fetch class data:', error);
-    }
-  };
-
-  const fetchModules = async (silent = false) => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('No auth token found');
-        setLoading(false);
-        return;
-      }
-
-      // Show cached data instantly if available
-      const cachedModules = getCachedData(CACHE_KEYS.modules(classId));
-      const cachedClassData = getCachedData(CACHE_KEYS.classData(classId));
-      
-      if (cachedModules && cachedClassData && !silent) {
-        setModules(cachedModules);
-        setClassData(cachedClassData);
-        inMemoryCache.current = { modules: cachedModules, classData: cachedClassData };
-        setLoading(false);
-        // Continue to fetch fresh data in background
-      }
-
-      if (!silent) setLoading(true);
-      
-      // Fetch class data
-      const classResponse = await axios.get(`${API_URL}/classes/${classId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const currentClassData = classResponse.data.data;
-      setClassData(currentClassData);
-      
-      // Fetch ALL lessons for instructor (includeUnpublished=true)
-      const lessonsResponse = await axios.get(`${API_URL}/lessons/class/${classId}?includeUnpublished=true`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => ({ data: { data: [] } }));
-
-      const lessonsData = lessonsResponse.data.data || [];
-      const totalWeeks = currentClassData?.totalWeeks || 10;
-      const weeklySchedule = currentClassData?.schedule?.weeklyLessons || [];
-
-      console.log('📚 Instructor Modules - Fetched Data:', {
-        totalWeeks,
-        totalLessons: lessonsData.length,
-        lessonsData
-      });
-
-      // Group lessons by week
-      const modulesMap = new Map<number, WeekModule>();
-      
-      for (let week = 1; week <= totalWeeks; week++) {
-        const weekLessons = lessonsData.filter((l: any) => l.weekNumber === week);
-        const publishedCount = weekLessons.filter((l: any) => l.isPublished).length;
-        const scheduleData = weeklySchedule.find((s: any) => s.week === week);
-        
-        modulesMap.set(week, {
-          week,
-          title: scheduleData?.title || `Week ${week}`,
-          lessons: weekLessons,
-          publishedCount,
-          totalLessons: weekLessons.length,
-        });
-      }
-
-      const modulesData = Array.from(modulesMap.values());
-      setModules(modulesData);
-      inMemoryCache.current = { modules: modulesData, classData: currentClassData };
-      
-      // Cache for instant loading next time
-      setCachedData(CACHE_KEYS.modules(classId), modulesData);
-      setCachedData(CACHE_KEYS.classData(classId), currentClassData);
-
-      console.log('✅ Instructor Modules Built:', modulesData.length, 'weeks');
-    } catch (error: any) {
-      console.error('❌ Failed to fetch modules:', error);
-      // Don't clear existing data on error if we have cached data
-      if (!inMemoryCache.current.modules) {
-        setModules([]);
-      }
-      // Show user-friendly error
-      if (error.response?.status === 401) {
-        console.error('Authentication error - instructor may need to log in again');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchPendingApprovals = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(
-        `${API_URL}/week-progress/pending?classId=${classId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setPendingApprovals(response.data.data || []);
-    } catch (error) {
-      console.error('Failed to fetch pending approvals:', error);
-      setPendingApprovals([]); // Set empty array on error
-    }
+  // Helper function to invalidate queries after mutations
+  const invalidateModulesQueries = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.lessons(classId, true) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.lessons(classId, false) });
+    // Also invalidate student-facing lesson queries
+    queryClient.invalidateQueries({ queryKey: ['lessons', classId] });
   };
 
   const toggleWeek = (week: number) => {
@@ -424,14 +294,14 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
   const handleSaveLesson = async () => {
     setSavingLesson(true);
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       
       if (editingLesson) {
         // Update existing lesson
         await axios.put(
           `${API_URL}/lessons/${editingLesson.id}`,
           { ...formData, classId },
-          { headers: { Authorization: `Bearer ${token}` } }
+          { headers }
         );
         toast.success('Lesson updated successfully!');
       } else {
@@ -441,7 +311,7 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
         const response = await axios.post(
           `${API_URL}/lessons`,
           { ...formData, classId },
-          { headers: { Authorization: `Bearer ${token}` } }
+          { headers }
         );
         
         console.log('Create lesson response:', response.data);
@@ -483,8 +353,7 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
       }
       
       setShowCreateDialog(false);
-      invalidateModulesCache(classId);
-      fetchModules();
+      invalidateModulesQueries();
     } catch (error: any) {
       console.error('Failed to save lesson:', error);
       console.error('Error response:', error.response?.data);
@@ -500,13 +369,12 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
     
     setDeletingLesson(lessonId);
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       await axios.delete(`${API_URL}/lessons/${lessonId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
       toast.success('Lesson deleted successfully!');
-      invalidateModulesCache(classId);
-      fetchModules();
+      invalidateModulesQueries();
     } catch (error) {
       console.error('Failed to delete lesson:', error);
       toast.error('Failed to delete lesson');
@@ -518,15 +386,14 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
   const handleTogglePublish = async (lesson: Lesson) => {
     setPublishingLesson(lesson.id);
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       await axios.put(
         `${API_URL}/lessons/${lesson.id}`,
         { isPublished: !lesson.isPublished },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers }
       );
       toast.success(lesson.isPublished ? 'Lesson unpublished' : 'Lesson published!');
-      invalidateModulesCache(classId);
-      fetchModules();
+      invalidateModulesQueries();
     } catch (error) {
       console.error('Failed to toggle publish:', error);
       toast.error('Failed to update lesson');
@@ -573,15 +440,15 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
 
   const uploadFileToLesson = async (file: File, lessonId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       
       // Upload file
-      const formData = new FormData();
-      formData.append('file', file);
+      const formDataObj = new FormData();
+      formDataObj.append('file', file);
       
-      const uploadResponse = await axios.post(`${API_URL}/upload`, formData, {
+      const uploadResponse = await axios.post(`${API_URL}/upload`, formDataObj, {
         headers: { 
-          Authorization: `Bearer ${token}`,
+          ...headers,
           'Content-Type': 'multipart/form-data',
         },
       });
@@ -609,7 +476,7 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
           fileSize: file.size,
           orderIndex: 0,
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers }
       );
 
       toast.success(`${file.name} uploaded successfully!`);
@@ -658,9 +525,9 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
 
   const fetchCourseMaterials = async (lessonId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       const response = await axios.get(`${API_URL}/course-materials/lesson/${lessonId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
       setCourseMaterials(response.data.data || []);
     } catch (error) {
@@ -673,9 +540,9 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
 
     setDeletingMaterial(materialId);
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       await axios.delete(`${API_URL}/course-materials/${materialId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
       toast.success('File deleted successfully!');
       await fetchCourseMaterials(lessonId);
@@ -711,14 +578,14 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
 
   const handleApproveWeek = async (progressId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       await axios.post(
         `${API_URL}/week-progress/${progressId}/approve`,
         { instructorApproved: true },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers }
       );
       toast.success('Week progress approved!');
-      fetchPendingApprovals();
+      queryClient.invalidateQueries({ queryKey: ['week-progress', 'pending', classId] });
     } catch (error) {
       console.error('Failed to approve:', error);
       toast.error('Failed to approve progress');
@@ -731,15 +598,15 @@ export default function InstructorModulesPage({ classId, onPendingChange }: Inst
     }
     
     try {
-      const token = localStorage.getItem('token');
+      const headers = getAuthHeaders();
       // Use the approve endpoint but set instructorApproved to false
       await axios.post(
         `${API_URL}/week-progress/${progressId}/approve`,
         { instructorApproved: false, completed: false },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers }
       );
       toast.success('Week progress rejected');
-      fetchPendingApprovals();
+      queryClient.invalidateQueries({ queryKey: ['week-progress', 'pending', classId] });
     } catch (error) {
       console.error('Failed to reject:', error);
       toast.error('Failed to reject progress');

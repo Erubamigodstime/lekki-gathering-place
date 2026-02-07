@@ -59,6 +59,7 @@ const instructorNavItems = [
 const studentNavItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Browse Classes', url: '/classes', icon: BookOpen },
+  { title: 'My Attendance', url: '/attendance', icon: ClipboardCheck },
   { title: 'Profile', url: '/profile', icon: UserCircle },
 ];
 

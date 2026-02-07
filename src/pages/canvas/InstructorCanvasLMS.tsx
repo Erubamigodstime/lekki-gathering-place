@@ -11,7 +11,8 @@ import {
   ChevronLeft,
   GraduationCap,
   Menu,
-  X
+  X,
+  Award
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import axios from 'axios';
@@ -25,10 +26,11 @@ import InstructorPeoplePage from './instructor-lms/InstructorPeoplePage';
 import InstructorAssignmentsPage from './instructor-lms/InstructorAssignmentsPage';
 import InstructorGradebookTable from './instructor-lms/InstructorGradebookTable';
 import InstructorSettingsPage from './instructor-lms/InstructorSettingsPage';
+import InstructorCertificateProgressPage from './instructor-lms/InstructorCertificateProgressPage';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
-type InstructorLMSPage = 'announcements' | 'modules' | 'assignments' | 'inbox' | 'people' | 'gradebook' | 'settings';
+type InstructorLMSPage = 'announcements' | 'modules' | 'assignments' | 'inbox' | 'people' | 'gradebook' | 'certificates' | 'settings';
 
 interface ClassData {
   id: string;
@@ -100,6 +102,7 @@ export default function InstructorCanvasLMS() {
     { id: 'inbox' as InstructorLMSPage, label: 'Inbox', icon: Mail, badge: unreadMessages },
     { id: 'people' as InstructorLMSPage, label: 'Students', icon: Users, badge: null },
     { id: 'gradebook' as InstructorLMSPage, label: 'Gradebook', icon: GraduationCap, badge: null },
+    { id: 'certificates' as InstructorLMSPage, label: 'Certificate Progress', icon: Award, badge: null },
     { id: 'settings' as InstructorLMSPage, label: 'Settings', icon: Settings, badge: null },
   ];
 
@@ -119,6 +122,8 @@ export default function InstructorCanvasLMS() {
         return <InstructorPeoplePage classId={classId} />;
       case 'gradebook':
         return <InstructorGradebookTable classId={classId} />;
+      case 'certificates':
+        return <InstructorCertificateProgressPage classId={classId} />;
       case 'settings':
         return <InstructorSettingsPage classId={classId} classData={classData} onUpdate={fetchClassData} />;
       default:

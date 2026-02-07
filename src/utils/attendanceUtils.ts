@@ -1,8 +1,8 @@
 import { addWeeks, format, startOfWeek, isSameDay, isAfter, isBefore, parseISO, startOfDay } from 'date-fns';
 
-// Program start date - January 8th, 2026 (updated for current term)
+// Program start date - December 2nd, 2025 (gathering start)
 // Use explicit year/month/day to avoid UTC timezone issues
-export const PROGRAM_START_DATE = new Date(2026, 0, 8); // January 8, 2026 in local time
+export const PROGRAM_START_DATE = new Date(2025, 11, 2); // December 2, 2025 in local time
 export const TOTAL_WEEKS = 12;
 
 // Day name to number mapping (0 = Sunday, 1 = Monday, etc.)

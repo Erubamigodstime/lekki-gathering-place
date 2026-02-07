@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Users, Mail, Search, User } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -14,6 +15,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import axios from 'axios';
+import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
@@ -33,89 +35,71 @@ interface PeoplePageProps {
 }
 
 export default function PeoplePage({ classId, onMessageUser }: PeoplePageProps) {
-  const [members, setMembers] = useState<ClassMember[]>([]);
-  const [filteredMembers, setFilteredMembers] = useState<ClassMember[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchClassMembers();
-  }, [classId]);
+  // Fetch class details with members
+  const { data: classData, isLoading: loading } = useQuery({
+    queryKey: queryKeys.classById(classId),
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API_URL}/classes/${classId}`, { headers });
+      return response.data.data || response.data;
+    },
+    staleTime: staleTimes.standard,
+  });
 
-  useEffect(() => {
-    if (searchQuery.trim() === '') {
-      setFilteredMembers(members);
-    } else {
-      const query = searchQuery.toLowerCase();
-      setFilteredMembers(
-        members.filter(
-          (member) =>
-            member.firstName.toLowerCase().includes(query) ||
-            member.lastName.toLowerCase().includes(query) ||
-            member.email.toLowerCase().includes(query)
-        )
-      );
-    }
-  }, [searchQuery, members]);
+  // Build members list from class data
+  const members = useMemo(() => {
+    if (!classData) return [];
+    
+    const membersList: ClassMember[] = [];
 
-  const fetchClassMembers = async () => {
-    try {
-      const token = localStorage.getItem('token');
-
-      // Fetch class details with instructor and enrollments
-      const classResponse = await axios.get(`${API_URL}/classes/${classId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+    // Add instructor first
+    if (classData?.instructor) {
+      const instructor = classData.instructor;
+      membersList.push({
+        id: instructor.userId || instructor.id,
+        firstName: instructor.user?.firstName || instructor.firstName || 'Instructor',
+        lastName: instructor.user?.lastName || instructor.lastName || '',
+        email: instructor.user?.email || instructor.email || '',
+        role: 'INSTRUCTOR',
+        profilePicture: instructor.user?.profilePicture || instructor.profilePicture,
       });
-
-      console.log('Class response:', classResponse.data);
-
-      const membersList: ClassMember[] = [];
-      const classData = classResponse.data.data || classResponse.data;
-
-      // Add instructor first
-      if (classData?.instructor) {
-        const instructor = classData.instructor;
-        console.log('Instructor data:', instructor);
-        membersList.push({
-          id: instructor.userId || instructor.id,
-          firstName: instructor.user?.firstName || instructor.firstName || 'Instructor',
-          lastName: instructor.user?.lastName || instructor.lastName || '',
-          email: instructor.user?.email || instructor.email || '',
-          role: 'INSTRUCTOR',
-          profilePicture: instructor.user?.profilePicture || instructor.profilePicture,
-        });
-      }
-
-      // Add all approved students from class enrollments
-      if (classData?.enrollments && Array.isArray(classData.enrollments)) {
-        console.log('Processing enrollments from class data:', classData.enrollments);
-        classData.enrollments.forEach((enrollment: any) => {
-          console.log('Enrollment item:', enrollment);
-          if (enrollment.status === 'APPROVED' && enrollment.student?.user) {
-            membersList.push({
-              id: enrollment.student.userId,
-              firstName: enrollment.student.user.firstName,
-              lastName: enrollment.student.user.lastName,
-              email: enrollment.student.user.email,
-              role: 'STUDENT',
-              profilePicture: enrollment.student.user.profilePicture,
-              enrollmentStatus: enrollment.status,
-            });
-          }
-        });
-      } else {
-        console.log('No enrollments found in class data');
-      }
-
-      console.log('Final members list:', membersList);
-      setMembers(membersList);
-      setFilteredMembers(membersList);
-    } catch (error) {
-      console.error('Failed to fetch class members:', error);
-    } finally {
-      setLoading(false);
     }
-  };
+
+    // Add all approved students from class enrollments
+    if (classData?.enrollments && Array.isArray(classData.enrollments)) {
+      classData.enrollments.forEach((enrollment: any) => {
+        if (enrollment.status === 'APPROVED' && enrollment.student?.user) {
+          membersList.push({
+            id: enrollment.student.userId,
+            firstName: enrollment.student.user.firstName,
+            lastName: enrollment.student.user.lastName,
+            email: enrollment.student.user.email,
+            role: 'STUDENT',
+            profilePicture: enrollment.student.user.profilePicture,
+            enrollmentStatus: enrollment.status,
+          });
+        }
+      });
+    }
+
+    return membersList;
+  }, [classData]);
+
+  // Filter members based on search query
+  const filteredMembers = useMemo(() => {
+    if (searchQuery.trim() === '') {
+      return members;
+    }
+    const query = searchQuery.toLowerCase();
+    return members.filter(
+      (member) =>
+        member.firstName.toLowerCase().includes(query) ||
+        member.lastName.toLowerCase().includes(query) ||
+        member.email.toLowerCase().includes(query)
+    );
+  }, [searchQuery, members]);
 
   const instructor = filteredMembers.find((m) => m.role === 'INSTRUCTOR');
   const students = filteredMembers.filter((m) => m.role === 'STUDENT');

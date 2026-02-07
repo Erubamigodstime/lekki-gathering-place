@@ -5,121 +5,61 @@ import { RecentActivityCard } from '@/components/dashboard/RecentActivityCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import { toast } from 'sonner';
 import { ClassAttendanceCalendar } from '@/components/attendance';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+// Enterprise Query & Mutation Hooks
+import { 
+  useInstructorProfile, 
+  usePendingAttendance, 
+  usePendingEnrollments,
+} from '@/hooks/queries';
+import { 
+  useApproveAttendance, 
+  useRejectAttendance,
+  useApproveEnrollment,
+  useRejectEnrollment,
+} from '@/hooks/mutations';
 
 export default function InstructorDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const [instructorProfile, setInstructorProfile] = useState<any>(null);
-  const [teachingClasses, setTeachingClasses] = useState<any[]>([]);
-  const [pendingAttendance, setPendingAttendance] = useState<any[]>([]);
-  const [pendingEnrollments, setPendingEnrollments] = useState<any[]>([]);
-  const [allAttendanceRecords, setAllAttendanceRecords] = useState<any[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchInstructorData = async () => {
-      try {
-        setError(null);
+  // Enterprise Query Hooks - Centralized Data Fetching
+  const { 
+    data: instructorProfile, 
+    isLoading: profileLoading,
+    error: profileError 
+  } = useInstructorProfile();
 
-        // Abort previous request if any
-        if (abortControllerRef.current) {
-          abortControllerRef.current.abort();
-        }
+  // Derive teaching classes from instructor profile
+  const teachingClasses = useMemo(() => {
+    if (!instructorProfile?.classes) return [];
+    return Array.from(
+      new Map((instructorProfile.classes || []).map((cls: any) => [cls.id, cls])).values()
+    ) as any[];
+  }, [instructorProfile]);
 
-        abortControllerRef.current = new AbortController();
-        const { signal } = abortControllerRef.current;
+  const instructorClassIds = useMemo(() => teachingClasses.map((c: any) => c.id), [teachingClasses]);
 
-        const token = localStorage.getItem('token');
+  // Enterprise Query Hooks for pending items
+  const { data: pendingAttendance = [], isLoading: attendanceLoading } = usePendingAttendance(instructorClassIds);
+  const { data: pendingEnrollments = [], isLoading: enrollmentsLoading } = usePendingEnrollments(instructorClassIds);
 
-        if (!token) {
-          setError('Authentication token not found. Please login again.');
-          setLoading(false);
-          return;
-        }
+  // Enterprise Mutation Hooks
+  const approveAttendanceMutation = useApproveAttendance();
+  const rejectAttendanceMutation = useRejectAttendance();
+  const approveEnrollmentMutation = useApproveEnrollment();
+  const rejectEnrollmentMutation = useRejectEnrollment();
 
-        const headers = { Authorization: `Bearer ${token}` };
-
-        // Get instructor profile with all data in ONE call
-        const profileRes = await axios.get(`${API_URL}/instructors/profile`, {
-          headers,
-          signal,
-          timeout: 15000
-        });
-
-        if (!profileRes.data || !profileRes.data.data) {
-          throw new Error('Invalid response structure from instructor profile API');
-        }
-
-        const instructorData = profileRes.data.data;
-        setInstructorProfile(instructorData);
-
-        // Process classes (already included in profile response)
-        const uniqueClasses = Array.from(
-          new Map((instructorData.classes || []).map((cls: any) => [cls.id, cls])).values()
-        ) as any[];
-
-        setTeachingClasses(uniqueClasses);
-
-        // Fetch pending attendance and enrollments in PARALLEL if instructor has classes
-        if (uniqueClasses.length > 0) {
-          const [attendanceRes, enrollmentsRes] = await Promise.all([
-            axios.get(`${API_URL}/attendance?status=PENDING&page=1&limit=20`, { headers, signal }),
-            axios.get(`${API_URL}/enrollments?status=PENDING&page=1&limit=20`, { headers, signal })
-          ]);
-
-          // Filter for instructor's classes only
-          const instructorClassIds = uniqueClasses.map(c => c.id);
-          const filteredAttendance = (attendanceRes.data.data.data || attendanceRes.data.data || [])
-            .filter((a: any) => instructorClassIds.includes(a.classId));
-          const filteredEnrollments = (enrollmentsRes.data.data.data || enrollmentsRes.data.data || [])
-            .filter((e: any) => instructorClassIds.includes(e.classId));
-
-          setPendingAttendance(filteredAttendance);
-          setPendingEnrollments(filteredEnrollments);
-        } else {
-          setPendingAttendance([]);
-          setPendingEnrollments([]);
-        }
-      } catch (error) {
-        console.error('Failed to fetch instructor data:', error);
-        if (axios.isAxiosError(error)) {
-          console.error('Error details:', error.response?.data);
-          console.error('Error status:', error.response?.status);
-
-          if (error.code === 'ECONNABORTED') {
-            setError('The server is taking longer than expected to respond. It may be waking up from sleep. Please wait a moment and try refreshing the page.');
-          } else {
-            setError(error.response?.data?.message || 'Failed to load dashboard data. Please try again.');
-          }
-        } else {
-          setError('An unexpected error occurred');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInstructorData();
-
-    return () => {
-      // Cleanup: abort any pending requests on unmount
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
+  const loading = profileLoading || attendanceLoading || enrollmentsLoading;
+  const error = profileError ? (profileError as Error).message : null;
 
   // Memoized: Total students across all teaching classes
   const totalStudents = useMemo(() => {
@@ -181,14 +121,10 @@ export default function InstructorDashboard() {
       }));
   }, [pendingAttendance, pendingEnrollments]);
 
-  const handleApproveAttendance = async (id: string) => {
+  // Handler functions using mutation hooks
+  const handleApproveAttendance = async (id: string, classId: string) => {
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(`${API_URL}/attendance/${id}/approve`,
-        { status: 'APPROVED' },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setPendingAttendance(prev => prev.filter(a => a.id !== id));
+      await approveAttendanceMutation.mutateAsync({ attendanceId: id, classId });
       toast.success('Attendance approved!', {
         description: 'Student attendance has been confirmed',
       });
@@ -200,14 +136,9 @@ export default function InstructorDashboard() {
     }
   };
 
-  const handleRejectAttendance = async (id: string) => {
+  const handleRejectAttendance = async (id: string, classId: string) => {
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(`${API_URL}/attendance/${id}/approve`,
-        { status: 'REJECTED', rejectionReason: 'Not approved' },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setPendingAttendance(prev => prev.filter(a => a.id !== id));
+      await rejectAttendanceMutation.mutateAsync({ attendanceId: id, classId });
       toast.success('Attendance rejected', {
         description: 'The attendance request has been rejected',
       });
@@ -219,18 +150,12 @@ export default function InstructorDashboard() {
     }
   };
 
-  const handleApproveEnrollment = async (id: string) => {
+  const handleApproveEnrollment = async (id: string, classId: string) => {
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(`${API_URL}/enrollments/${id}/approve`,
-        { status: 'APPROVED' },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setPendingEnrollments(prev => prev.filter(e => e.id !== id));
+      await approveEnrollmentMutation.mutateAsync({ enrollmentId: id, classId });
       toast.success('Enrollment approved!', {
         description: 'Student can now access the class',
       });
-      // totalStudents will auto-update via useMemo when classes data refreshes
     } catch (error: any) {
       console.error('Failed to approve enrollment:', error);
       toast.error('Failed to approve enrollment', {
@@ -239,14 +164,9 @@ export default function InstructorDashboard() {
     }
   };
 
-  const handleRejectEnrollment = async (id: string) => {
+  const handleRejectEnrollment = async (id: string, classId: string) => {
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(`${API_URL}/enrollments/${id}/approve`,
-        { status: 'REJECTED', rejectionReason: 'Not approved' },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setPendingEnrollments(prev => prev.filter(e => e.id !== id));
+      await rejectEnrollmentMutation.mutateAsync({ enrollmentId: id, classId });
       toast.success('Enrollment rejected', {
         description: 'The enrollment request has been declined',
       });
@@ -381,12 +301,11 @@ export default function InstructorDashboard() {
           <div className="grid gap-6 lg:grid-cols-3">
             {/* Left Column */}
             <div className="lg:col-span-2 space-y-6">
-              {/* My Teaching Classes */}
-              <Card className="shadow-card">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg font-semibold">My Teaching Classes</CardTitle>
-                </CardHeader>
-                <CardContent>
+              {/* My  Classes */}
+              <div className="space-y-3">
+                <h2 className="text-lg font-semibold text-foreground">My Classes</h2>
+                <Card className="shadow-card">
+                  <CardContent className="pt-6">
                   {loading ? (
                     <div className="flex flex-col items-center justify-center py-12">
                       <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
@@ -440,25 +359,22 @@ export default function InstructorDashboard() {
                       ))}
                     </div>
                   )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </div>
 
               {/* Pending Attendance Approvals */}
-              <Card className="shadow-card">
-                <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                  <CardTitle className="text-lg font-semibold">Pending Attendance Approvals</CardTitle>
-                  <Badge variant="outline" className="text-amber-600 border-amber-600">
-                    {pendingAttendance.length} pending
-                  </Badge>
-                </CardHeader>
-                <CardContent>
+              <div className="space-y-3">
+                <h2 className="text-lg font-semibold text-foreground">Pending Attendance Approvals</h2>
+                <Card className="shadow-card">
+                  <CardContent className="p-0">
                   {loading ? (
-                    <div className="flex flex-col items-center justify-center py-8">
+                    <div className="flex flex-col items-center justify-center py-8 px-6">
                       <Loader2 className="h-10 w-10 animate-spin text-primary mb-3" />
                       <p className="text-sm text-muted-foreground">Loading attendance...</p>
                     </div>
                   ) : pendingAttendance.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8">
+                    <div className="flex flex-col items-center justify-center py-8 px-6">
                       <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mb-3">
                         <Check className="h-7 w-7 text-green-600" />
                       </div>
@@ -466,58 +382,140 @@ export default function InstructorDashboard() {
                       <p className="text-sm text-muted-foreground text-center">No pending attendance to review</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {pendingAttendance.slice(0, 5).map((attendance) => (
-                        <div key={attendance.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10">
-                              <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                                {attendance.student.user.firstName.charAt(0)}{attendance.student.user.lastName.charAt(0)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium text-foreground">
-                                {attendance.student.user.firstName} {attendance.student.user.lastName}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
+                    <>
+                      {/* Desktop Table */}
+                      <div className="hidden md:block overflow-x-auto">
+                        <Table>
+                          <TableHeader className="bg-sidebar">
+                            <TableRow className="hover:bg-sidebar border-sidebar-border">
+                              <TableHead className="text-sidebar-foreground font-semibold">Student</TableHead>
+                              <TableHead className="text-sidebar-foreground font-semibold">Class</TableHead>
+                              <TableHead className="text-sidebar-foreground font-semibold">Date</TableHead>
+                              <TableHead className="text-sidebar-foreground font-semibold text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {pendingAttendance.slice(0, 5).map((attendance) => (
+                              <TableRow key={attendance.id}>
+                                <TableCell>
+                                  <div className="flex items-center gap-3">
+                                    <Avatar className="h-8 w-8">
+                                      <AvatarImage src={attendance.student.user.profilePicture} alt={`${attendance.student.user.firstName} ${attendance.student.user.lastName}`} />
+                                      <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                                        {attendance.student.user.firstName.charAt(0)}{attendance.student.user.lastName.charAt(0)}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                    <span className="font-medium">
+                                      {attendance.student.user.firstName} {attendance.student.user.lastName}
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {attendance.class?.name || 'N/A'}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {new Date(attendance.date).toLocaleDateString()}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex justify-end gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-green-600 border-green-600 hover:bg-green-50"
+                                      onClick={() => handleApproveAttendance(attendance.id, attendance.classId)}
+                                      disabled={approveAttendanceMutation.isPending}
+                                    >
+                                      {approveAttendanceMutation.isPending ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                      ) : (
+                                        <Check className="h-4 w-4" />
+                                      )}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-destructive border-destructive hover:bg-destructive/10"
+                                      onClick={() => handleRejectAttendance(attendance.id, attendance.classId)}
+                                      disabled={rejectAttendanceMutation.isPending}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      
+                      {/* Mobile Cards */}
+                      <div className="md:hidden space-y-3 p-4">
+                        {pendingAttendance.slice(0, 5).map((attendance) => (
+                          <div key={attendance.id} className="bg-muted/30 rounded-lg p-4 space-y-3">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10">
+                                <AvatarImage src={attendance.student.user.profilePicture} alt={`${attendance.student.user.firstName} ${attendance.student.user.lastName}`} />
+                                <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                                  {attendance.student.user.firstName.charAt(0)}{attendance.student.user.lastName.charAt(0)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium truncate">
+                                  {attendance.student.user.firstName} {attendance.student.user.lastName}
+                                </p>
+                                <p className="text-sm text-muted-foreground truncate">
+                                  {attendance.class?.name || 'N/A'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                              <span className="text-sm text-muted-foreground">
                                 {new Date(attendance.date).toLocaleDateString()}
-                              </p>
+                              </span>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-green-600 border-green-600 hover:bg-green-50"
+                                  onClick={() => handleApproveAttendance(attendance.id, attendance.classId)}
+                                  disabled={approveAttendanceMutation.isPending}
+                                >
+                                  {approveAttendanceMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                  ) : (
+                                    <Check className="h-4 w-4 mr-1" />
+                                  )}
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-destructive border-destructive hover:bg-destructive/10"
+                                  onClick={() => handleRejectAttendance(attendance.id, attendance.classId)}
+                                  disabled={rejectAttendanceMutation.isPending}
+                                >
+                                  <X className="h-4 w-4 mr-1" />
+                                  Reject
+                                </Button>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-green-600 border-green-600 hover:bg-green-50"
-                              onClick={() => handleApproveAttendance(attendance.id)}
-                            >
-                              Approve
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-destructive border-destructive hover:bg-destructive/10"
-                              onClick={() => handleRejectAttendance(attendance.id)}
-                            >
-                              Reject
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    </>
                   )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
 
             {/* Right Column */}
             <div className="space-y-6">
               {/* Enrollment Requests */}
-              <Card className="shadow-card">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg font-semibold">Enrollment Requests</CardTitle>
-                </CardHeader>
-                <CardContent>
+              <div className="space-y-3">
+                <h2 className="text-lg font-semibold text-foreground">Enrollment Requests</h2>
+                <Card className="shadow-card">
+                  <CardContent className="pt-6">
                   {loading ? (
                     <div className="flex flex-col items-center justify-center py-8">
                       <Loader2 className="h-10 w-10 animate-spin text-primary mb-3" />
@@ -537,6 +535,7 @@ export default function InstructorDashboard() {
                         <div key={enrollment.id} className="p-3 rounded-lg bg-muted/30">
                           <div className="flex items-center gap-3 mb-2">
                             <Avatar className="h-9 w-9">
+                              <AvatarImage src={enrollment.student.user.profilePicture} alt={`${enrollment.student.user.firstName} ${enrollment.student.user.lastName}`} />
                               <AvatarFallback className="bg-accent/10 text-accent text-sm font-semibold">
                                 {enrollment.student.user.firstName.charAt(0)}{enrollment.student.user.lastName.charAt(0)}
                               </AvatarFallback>
@@ -556,7 +555,8 @@ export default function InstructorDashboard() {
                               size="sm"
                               variant="default"
                               className="flex-1 h-8"
-                              onClick={() => handleApproveEnrollment(enrollment.id)}
+                              onClick={() => handleApproveEnrollment(enrollment.id, enrollment.classId)}
+                              disabled={approveEnrollmentMutation.isPending}
                             >
                               Accept
                             </Button>
@@ -564,7 +564,8 @@ export default function InstructorDashboard() {
                               size="sm"
                               variant="outline"
                               className="flex-1 h-8"
-                              onClick={() => handleRejectEnrollment(enrollment.id)}
+                              onClick={() => handleRejectEnrollment(enrollment.id, enrollment.classId)}
+                              disabled={rejectEnrollmentMutation.isPending}
                             >
                               Decline
                             </Button>
@@ -573,8 +574,9 @@ export default function InstructorDashboard() {
                       ))}
                     </div>
                   )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </div>
 
               <RecentActivityCard activities={recentActivities} loading={loading} />
             </div>

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, Check, X, Clock, Users, BookOpen, CheckCircle, UserCheck, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,6 +33,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import axios from 'axios';
+import { getAuthHeaders, staleTimes } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
 
@@ -65,10 +67,7 @@ interface InstructorClass {
 export default function InstructorEnrollmentPage() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [enrollmentRecords, setEnrollmentRecords] = useState<EnrollmentRecord[]>([]);
-  const [classes, setClasses] = useState<InstructorClass[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState('all');
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
@@ -76,28 +75,15 @@ export default function InstructorEnrollmentPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchInstructorClasses();
-  }, []);
-
-  useEffect(() => {
-    if (classes.length > 0) {
-      fetchPendingEnrollments();
-    }
-  }, [classes, classFilter]);
-
-  const fetchInstructorClasses = async () => {
-    try {
-      setError(null);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setError('Authentication required. Please log in again.');
-        setLoading(false);
-        return;
-      }
-
+  // Fetch instructor's classes with React Query
+  const { data: classes = [], isLoading: loadingClasses, error: classesError } = useQuery({
+    queryKey: ['instructor', 'classes', user?.id],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return [];
+      
       const response = await axios.get(`${API_URL}/classes`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
         timeout: 15000,
       });
 
@@ -106,49 +92,44 @@ export default function InstructorEnrollmentPage() {
         cls.instructor?.userId === user?.id
       );
 
-      setClasses(instructorClasses.map((cls: any) => ({
+      return instructorClasses.map((cls: any) => ({
         id: cls.id,
         name: cls.name
-      })));
-    } catch (error: any) {
-      console.error('Failed to fetch classes:', error);
-      const errorMessage = axios.isAxiosError(error)
-        ? error.response?.data?.message || 'Failed to load classes. Please try again.'
-        : 'An unexpected error occurred. Please refresh the page.';
-      setError(errorMessage);
-      setClasses([]);
-    }
-  };
+      })) as InstructorClass[];
+    },
+    staleTime: staleTimes.static,
+    enabled: !!user?.id,
+  });
 
-  const fetchPendingEnrollments = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setError('Authentication required. Please log in again.');
-        setLoading(false);
-        return;
-      }
+  // Fetch pending enrollments with React Query
+  const { data: enrollmentRecords = [], isLoading: loadingEnrollments, error: enrollmentsError } = useQuery({
+    queryKey: ['instructor', 'enrollments', 'pending', classes.map(c => c.id)],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers || classes.length === 0) return [];
 
       const response = await axios.get(`${API_URL}/enrollments`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
         params: { status: 'PENDING' },
         timeout: 15000,
       });
 
       const allEnrollments = response.data.data || [];
-      setEnrollmentRecords(Array.isArray(allEnrollments) ? allEnrollments : []);
-    } catch (error: any) {
-      console.error('Failed to fetch enrollments:', error);
-      const errorMessage = axios.isAxiosError(error)
-        ? error.response?.data?.message || 'Failed to load enrollment requests. Please try again.'
-        : 'An unexpected error occurred. Please refresh the page.';
-      setError(errorMessage);
-      setEnrollmentRecords([]);
-    } finally {
-      setLoading(false);
-    }
+      return (Array.isArray(allEnrollments) ? allEnrollments : []) as EnrollmentRecord[];
+    },
+    staleTime: staleTimes.dynamic,
+    enabled: classes.length > 0,
+  });
+
+  const loading = loadingClasses || loadingEnrollments;
+  const error = classesError || enrollmentsError 
+    ? (classesError as Error)?.message || (enrollmentsError as Error)?.message || 'An error occurred'
+    : null;
+
+  // Invalidate and refetch after mutations
+  const invalidateEnrollments = () => {
+    queryClient.invalidateQueries({ queryKey: ['instructor', 'enrollments'] });
+    queryClient.invalidateQueries({ queryKey: ['enrollments'] });
   };
 
   const handleApprove = async (recordId: string) => {
@@ -157,21 +138,27 @@ export default function InstructorEnrollmentPage() {
       const token = localStorage.getItem('token');
       if (!token) return;
 
+      // Optimistic update - remove from list
+      queryClient.setQueryData<EnrollmentRecord[]>(
+        ['instructor', 'enrollments', 'pending', classes.map(c => c.id)],
+        (old = []) => old.filter(r => r.id !== recordId)
+      );
+
       await axios.patch(
         `${API_URL}/enrollments/${recordId}/approve`,
         { status: 'APPROVED' },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Remove from pending list
-      setEnrollmentRecords(prev => prev.filter(r => r.id !== recordId));
-
       toast({
         title: 'Success',
         description: 'Enrollment approved successfully',
       });
+      
+      invalidateEnrollments();
     } catch (error: any) {
       console.error('Failed to approve enrollment:', error);
+      invalidateEnrollments(); // Revert on error
       toast({
         title: 'Error',
         description: error.response?.data?.message || 'Failed to approve enrollment',
@@ -197,6 +184,12 @@ export default function InstructorEnrollmentPage() {
       const token = localStorage.getItem('token');
       if (!token) return;
 
+      // Optimistic update - remove from list
+      queryClient.setQueryData<EnrollmentRecord[]>(
+        ['instructor', 'enrollments', 'pending', classes.map(c => c.id)],
+        (old = []) => old.filter(r => r.id !== selectedRecord.id)
+      );
+
       await axios.patch(
         `${API_URL}/enrollments/${selectedRecord.id}/approve`,
         { 
@@ -206,9 +199,6 @@ export default function InstructorEnrollmentPage() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Remove from pending list
-      setEnrollmentRecords(prev => prev.filter(r => r.id !== selectedRecord.id));
-
       toast({
         title: 'Success',
         description: 'Enrollment rejected',
@@ -217,8 +207,11 @@ export default function InstructorEnrollmentPage() {
       setRejectDialogOpen(false);
       setSelectedRecord(null);
       setRejectionReason('');
+      
+      invalidateEnrollments();
     } catch (error: any) {
       console.error('Failed to reject enrollment:', error);
+      invalidateEnrollments(); // Revert on error
       toast({
         title: 'Error',
         description: error.response?.data?.message || 'Failed to reject enrollment',
@@ -300,8 +293,7 @@ export default function InstructorEnrollmentPage() {
                   size="sm"
                   className="border-red-600 text-red-600 hover:bg-red-100 dark:border-red-400 dark:text-red-400"
                   onClick={() => {
-                    setError(null);
-                    fetchInstructorClasses();
+                    queryClient.invalidateQueries({ queryKey: ['instructor'] });
                   }}
                 >
                   <RefreshCw className="h-4 w-4 mr-2" />
@@ -404,19 +396,102 @@ export default function InstructorEnrollmentPage() {
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Student</TableHead>
-                  <TableHead>Class</TableHead>
-                  <TableHead>Ward</TableHead>
-                  <TableHead>Request Date</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <>
+              {/* Desktop Table */}
+              <div className="hidden md:block">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Student</TableHead>
+                      <TableHead>Class</TableHead>
+                      <TableHead>Ward</TableHead>
+                      <TableHead>Request Date</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRecords.map((record) => {
+                      // Safely extract values with fallbacks
+                      const firstName = record?.student?.user?.firstName || '';
+                      const lastName = record?.student?.user?.lastName || '';
+                      const email = record?.student?.user?.email || '';
+                      const phone = record?.student?.user?.phone;
+                      const className = record?.class?.name || 'Unknown Class';
+                      const wardId = record?.student?.user?.wardId;
+                      
+                      return (
+                      <TableRow key={record.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-9 w-9">
+                              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                                {firstName[0] || '?'}{lastName[0] || '?'}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-medium text-sm">
+                                {firstName} {lastName}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {email}
+                              </p>
+                              {phone && (
+                                <p className="text-xs text-muted-foreground">
+                                  {phone}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="font-medium">
+                            {className}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">
+                            Ward {wardId ? wardId.slice(0, 8) : 'N/A'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium">{formatDate(record.enrolledAt)}</span>
+                            <span className="text-xs text-muted-foreground">{formatTime(record.enrolledAt)}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="bg-green-600 hover:bg-green-700"
+                              onClick={() => handleApprove(record.id)}
+                              disabled={processingId === record.id}
+                            >
+                              <Check className="h-4 w-4 mr-1" />
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => openRejectDialog(record)}
+                              disabled={processingId === record.id}
+                            >
+                              <X className="h-4 w-4 mr-1" />
+                              Reject
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              
+              {/* Mobile Cards */}
+              <div className="md:hidden p-4 space-y-3">
                 {filteredRecords.map((record) => {
-                  // Safely extract values with fallbacks
                   const firstName = record?.student?.user?.firstName || '';
                   const lastName = record?.student?.user?.lastName || '';
                   const email = record?.student?.user?.email || '';
@@ -425,51 +500,40 @@ export default function InstructorEnrollmentPage() {
                   const wardId = record?.student?.user?.wardId;
                   
                   return (
-                  <TableRow key={record.id}>
-                    <TableCell>
+                    <div key={record.id} className="bg-muted/30 rounded-lg p-4 space-y-3">
                       <div className="flex items-center gap-3">
-                        <Avatar className="h-9 w-9">
-                          <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                        <Avatar className="h-11 w-11">
+                          <AvatarFallback className="bg-primary/10 text-primary font-semibold">
                             {firstName[0] || '?'}{lastName[0] || '?'}
                           </AvatarFallback>
                         </Avatar>
-                        <div>
-                          <p className="font-medium text-sm">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">
                             {firstName} {lastName}
                           </p>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-sm text-muted-foreground truncate">
                             {email}
                           </p>
-                          {phone && (
-                            <p className="text-xs text-muted-foreground">
-                              {phone}
-                            </p>
-                          )}
                         </div>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="font-medium">
-                        {className}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        Ward {wardId ? wardId.slice(0, 8) : 'N/A'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium">{formatDate(record.enrolledAt)}</span>
-                        <span className="text-xs text-muted-foreground">{formatTime(record.enrolledAt)}</span>
+                      
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <Badge variant="outline" className="font-medium">
+                          {className}
+                        </Badge>
+                        <Badge variant="secondary">
+                          Ward {wardId ? wardId.slice(0, 8) : 'N/A'}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {formatDate(record.enrolledAt)}
+                        </span>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
+                      
+                      <div className="flex gap-2 pt-2 border-t border-border/50">
                         <Button
                           size="sm"
                           variant="default"
-                          className="bg-green-600 hover:bg-green-700"
+                          className="flex-1 bg-green-600 hover:bg-green-700"
                           onClick={() => handleApprove(record.id)}
                           disabled={processingId === record.id}
                         >
@@ -479,6 +543,7 @@ export default function InstructorEnrollmentPage() {
                         <Button
                           size="sm"
                           variant="destructive"
+                          className="flex-1"
                           onClick={() => openRejectDialog(record)}
                           disabled={processingId === record.id}
                         >
@@ -486,12 +551,11 @@ export default function InstructorEnrollmentPage() {
                           Reject
                         </Button>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                );
+                    </div>
+                  );
                 })}
-              </TableBody>
-            </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

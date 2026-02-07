@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Camera, Mail, Phone, MapPin, Calendar, Edit2, Save, X, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +16,9 @@ import {
 } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
+import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
 
@@ -30,15 +32,10 @@ interface Ward {
 export default function ProfilePage() {
   const { user, updateUser } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [profileData, setProfileData] = useState<any>(null);
-  const [instructorStats, setInstructorStats] = useState<any>(null);
-  const [studentEnrollments, setStudentEnrollments] = useState<any[]>([]);
   const [uploadingPicture, setUploadingPicture] = useState(false);
-  const [wards, setWards] = useState<Ward[]>([]);
-  const [loadingWards, setLoadingWards] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -47,86 +44,57 @@ export default function ProfilePage() {
     wardId: '',
     ward: '',
   });
+  const [formInitialized, setFormInitialized] = useState(false);
 
   // Fetch wards from backend
-  useEffect(() => {
-    const fetchWards = async () => {
-      try {
-        setLoadingWards(true);
-        const response = await axios.get(`${API_URL}/wards`);
-        if (response.data.success) {
-          setWards(response.data.data);
-        }
-      } catch (error) {
-        console.error('Error fetching wards:', error);
-      } finally {
-        setLoadingWards(false);
-      }
-    };
-    fetchWards();
-  }, []);
+  const { data: wards = [], isLoading: loadingWards } = useQuery({
+    queryKey: queryKeys.wards,
+    queryFn: async () => {
+      const response = await axios.get(`${API_URL}/wards`);
+      return response.data.success ? response.data.data : [];
+    },
+    staleTime: staleTimes.static,
+  });
 
-  // Fetch profile data from database on mount
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        setIsLoading(true);
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_URL}/users/profile`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        const userData = response.data.data;
-        setProfileData(userData);
-        
-        // Populate form data with database values
-        setFormData({
-          firstName: userData.firstName || '',
-          lastName: userData.lastName || '',
-          email: userData.email || '',
-          phone: userData.phone || '',
-          wardId: userData.wardId || '',
-          ward: userData.ward?.name || '',
-        });
-
-        // Fetch additional data based on role
-        if (userData.role?.toLowerCase() === 'instructor') {
-          await fetchInstructorStats(token);
-        } else if (userData.role?.toLowerCase() === 'student') {
-          await fetchStudentEnrollments(token);
-        }
-      } catch (error: any) {
-        console.error('Failed to fetch profile:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load profile data',
-          variant: 'destructive',
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchProfile();
-  }, [toast]);
-
-  const fetchInstructorStats = async (token: string) => {
-    try {
-      // Fetch instructor's classes
-      const classesResponse = await axios.get(`${API_URL}/classes/my-classes`, {
-        headers: { Authorization: `Bearer ${token}` },
+  // Fetch profile data
+  const { data: profileData, isLoading: profileLoading } = useQuery({
+    queryKey: queryKeys.userProfile,
+    queryFn: async () => {
+      const response = await axios.get(`${API_URL}/users/profile`, {
+        headers: getAuthHeaders(),
       });
+      return response.data.data;
+    },
+    staleTime: staleTimes.standard,
+  });
 
+  // Initialize form data when profile loads (only once)
+  if (profileData && !formInitialized) {
+    setFormData({
+      firstName: profileData.firstName || '',
+      lastName: profileData.lastName || '',
+      email: profileData.email || '',
+      phone: profileData.phone || '',
+      wardId: profileData.wardId || '',
+      ward: profileData.ward?.name || '',
+    });
+    setFormInitialized(true);
+  }
+
+  // Fetch instructor stats if user is instructor
+  const { data: instructorStats } = useQuery({
+    queryKey: ['instructor-stats', profileData?.id],
+    queryFn: async () => {
+      const classesResponse = await axios.get(`${API_URL}/classes/my-classes`, {
+        headers: getAuthHeaders(),
+      });
       const classes = classesResponse.data.data || [];
       
-      // Fetch enrollments for all classes to count students
       let totalStudents = 0;
       const skillsSet = new Set<string>();
 
       for (const classItem of classes) {
-        // Add skills from class names/categories
         if (classItem.name) {
-          // Extract potential skills from class name
           const name = classItem.name.toLowerCase();
           if (name.includes('tailoring')) skillsSet.add('Tailoring');
           if (name.includes('fashion')) skillsSet.add('Fashion Design');
@@ -137,11 +105,10 @@ export default function ProfilePage() {
           if (name.includes('makeup')) skillsSet.add('Makeup Artistry');
         }
 
-        // Count approved students in this class
         try {
           const enrollmentsResponse = await axios.get(
             `${API_URL}/enrollments/class/${classItem.id}`,
-            { headers: { Authorization: `Bearer ${token}` } }
+            { headers: getAuthHeaders() }
           );
           const approvedEnrollments = (enrollmentsResponse.data.data || []).filter(
             (e: any) => e.status === 'APPROVED'
@@ -152,33 +119,34 @@ export default function ProfilePage() {
         }
       }
 
-      setInstructorStats({
+      return {
         totalClasses: classes.length,
         totalStudents,
         skills: Array.from(skillsSet),
-      });
-    } catch (error) {
-      console.error('Failed to fetch instructor stats:', error);
-    }
-  };
+      };
+    },
+    enabled: profileData?.role?.toLowerCase() === 'instructor',
+    staleTime: staleTimes.standard,
+  });
 
-  const fetchStudentEnrollments = async (token: string) => {
-    try {
+  // Fetch student enrollments if user is student
+  const { data: studentEnrollments = [] } = useQuery({
+    queryKey: queryKeys.myEnrollments,
+    queryFn: async () => {
       const response = await axios.get(`${API_URL}/enrollments/my-enrollments`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
-      
-      const enrollments = response.data.data || [];
-      setStudentEnrollments(enrollments);
-    } catch (error) {
-      console.error('Failed to fetch student enrollments:', error);
-    }
-  };
+      return response.data.data || [];
+    },
+    enabled: profileData?.role?.toLowerCase() === 'student',
+    staleTime: staleTimes.standard,
+  });
+
+  const isLoading = profileLoading;
 
   const handleSave = async () => {
     try {
       setIsSaving(true);
-      const token = localStorage.getItem('token');
       
       await axios.patch(
         `${API_URL}/users/profile`,
@@ -188,7 +156,7 @@ export default function ProfilePage() {
           phone: formData.phone,
           wardId: formData.wardId,
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: getAuthHeaders() }
       );
 
       toast({
@@ -197,18 +165,14 @@ export default function ProfilePage() {
       });
       setIsEditing(false);
       
-      // Refresh profile data
-      const response = await axios.get(`${API_URL}/users/profile`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const updatedProfile = response.data.data;
-      setProfileData(updatedProfile);
+      // Invalidate profile query to refresh data
+      queryClient.invalidateQueries({ queryKey: queryKeys.userProfile });
       
       // Update global user state
       updateUser({
-        firstName: updatedProfile.firstName,
-        lastName: updatedProfile.lastName,
-        phone: updatedProfile.phone,
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phone: formData.phone,
       });
     } catch (error: any) {
       console.error('Failed to update profile:', error);
@@ -248,24 +212,26 @@ export default function ProfilePage() {
 
     try {
       setUploadingPicture(true);
-      const token = localStorage.getItem('token');
-      const formData = new FormData();
-      formData.append('picture', file);
+      const uploadFormData = new FormData();
+      uploadFormData.append('picture', file);
 
       const response = await axios.post(
         `${API_URL}/users/profile/picture`,
-        formData,
+        uploadFormData,
         {
           headers: {
-            Authorization: `Bearer ${token}`,
+            ...getAuthHeaders(),
             'Content-Type': 'multipart/form-data',
           },
         }
       );
 
-      // Update local profile data
+      // Update the query cache with new profile picture
       const newProfilePicture = response.data.data.profilePicture;
-      setProfileData({ ...profileData, profilePicture: newProfilePicture });
+      queryClient.setQueryData(queryKeys.userProfile, (old: any) => ({
+        ...old,
+        profilePicture: newProfilePicture
+      }));
       
       // Update global user state in AuthContext
       updateUser({ profilePicture: newProfilePicture });

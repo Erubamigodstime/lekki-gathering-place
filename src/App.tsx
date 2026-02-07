@@ -28,7 +28,16 @@ import CanvasRouter from "./pages/canvas/CanvasRouter";
 // Layout
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes - data won't refetch if younger than this
+      gcTime: 30 * 60 * 1000, // 30 minutes - keep in cache
+      refetchOnWindowFocus: false, // Don't refetch when tab regains focus
+      retry: 1, // Only retry once on failure
+    },
+  },
+});
 
 const App = () => (
   <ErrorBoundary>

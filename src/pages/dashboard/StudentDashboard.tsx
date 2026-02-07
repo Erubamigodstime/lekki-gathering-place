@@ -3,16 +3,22 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import { toast } from 'sonner';
 import { StudentAttendanceCard } from '@/components/attendance';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+// Enterprise Query & Mutation Hooks
+import { 
+  useMyClasses, 
+  useMyAttendance, 
+  useClasses,
+  calculateAttendanceRate,
+  getApprovedEnrollments,
+} from '@/hooks/queries';
+import { useMarkAttendance } from '@/hooks/mutations';
 
 interface ClassSchedule {
   id: string;
@@ -49,159 +55,45 @@ interface AttendanceRecord {
 export default function StudentDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [enrollments, setEnrollments] = useState<any[]>([]);
-  const [schedule, setSchedule] = useState<ClassSchedule[]>([]);
-  const [recommendedClasses, setRecommendedClasses] = useState<RecommendedClass[]>([]);
-  const [attendanceHistory, setAttendanceHistory] = useState<AttendanceRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [attendanceRate, setAttendanceRate] = useState<number>(0);
-  const [refreshKey, setRefreshKey] = useState(0);
 
-  useEffect(() => {
-    let isMounted = true;
-    const abortController = new AbortController();
+  // Enterprise Query Hooks - Centralized Data Fetching
+  const { data: enrollments = [], isLoading: enrollmentsLoading } = useMyClasses();
+  const { data: attendanceHistory = [], isLoading: attendanceLoading } = useMyAttendance();
+  const { data: classesResponse } = useClasses({});
+  
+  // Extract array from paginated response
+  const allClasses = classesResponse?.data || [];
 
-    const fetchAllData = async () => {
-      try {
-        setLoading(true);
-        const token = localStorage.getItem('token');
-        if (!token) {
-          setLoading(false);
-          return;
-        }
+  // Enterprise Mutation Hook
+  const markAttendanceMutation = useMarkAttendance();
 
-        // Fetch enrollments first
-        const enrollmentsResponse = await axios.get(`${API_URL}/enrollments/my-classes`, {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: abortController.signal
-        });
+  const loading = enrollmentsLoading || attendanceLoading;
 
-        if (!isMounted) return;
+  // Use centralized helper for attendance calculation
+  const attendanceRate = useMemo(() => 
+    calculateAttendanceRate(attendanceHistory), 
+    [attendanceHistory]
+  );
 
-        const enrollmentData = enrollmentsResponse.data.data || [];
-        setEnrollments(enrollmentData);
+  // Use centralized helper for approved enrollments
+  const approvedEnrollments = useMemo(() => 
+    getApprovedEnrollments(enrollments as any),
+    [enrollments]
+  );
 
-        // Build schedule from enrollments
-        if (enrollmentData.length > 0) {
-          buildScheduleFromEnrollments(enrollmentData);
-        }
+  const pendingEnrollments = useMemo(() => 
+    (enrollments as any[]).filter((e) => e.status === 'PENDING'),
+    [enrollments]
+  );
 
-        // Fetch attendance history and recommended classes in parallel
-        const [attendanceResponse, recommendedResponse] = await Promise.all([
-          axios.get(`${API_URL}/attendance/my-attendance`, {
-            headers: { Authorization: `Bearer ${token}` },
-            signal: abortController.signal
-          }).catch(err => {
-            if (axios.isCancel(err)) return null;
-            console.error('Failed to fetch attendance history:', err);
-            return null;
-          }),
-          axios.get(`${API_URL}/classes`, {
-            headers: { Authorization: `Bearer ${token}` },
-            signal: abortController.signal
-          }).catch(err => {
-            if (axios.isCancel(err)) return null;
-            console.error('Failed to fetch recommended classes:', err);
-            return null;
-          })
-        ]);
-
-        if (!isMounted) return;
-
-        // Process attendance history
-        if (attendanceResponse?.data) {
-          const records = attendanceResponse.data.data || [];
-          setAttendanceHistory(records);
-
-          // Calculate attendance rate
-          if (records.length > 0) {
-            const approved = records.filter((r: any) => r.status === 'APPROVED').length;
-            const rate = Math.round((approved / records.length) * 100);
-            setAttendanceRate(rate);
-          }
-
-          // Update schedule with attendance status
-          setSchedule(prevSchedule =>
-            prevSchedule.map(item => {
-              const todayAttendance = records.find((r: any) =>
-                r.classId === item.id &&
-                new Date(r.date).toDateString() === new Date().toDateString()
-              );
-
-              if (todayAttendance) {
-                return {
-                  ...item,
-                  attendanceMarked: true,
-                  attendanceStatus: todayAttendance.status,
-                  attendanceId: todayAttendance.id
-                };
-              }
-              return item;
-            })
-          );
-        }
-
-        // Process recommended classes
-        if (recommendedResponse?.data) {
-          const allClasses = recommendedResponse.data.data || [];
-          const enrolledClassIds = enrollmentData.map((e: any) => e.classId);
-          const recommended = allClasses
-            .filter((cls: any) => !enrolledClassIds.includes(cls.id))
-            .slice(0, 3)
-            .map((cls: any) => ({
-              id: cls.id,
-              name: cls.name,
-              instructor: cls.instructorName || 'TBD',
-              schedule: cls.schedule?.days?.join(', ') || 'TBD',
-              enrolled: cls._count?.enrollments || 0,
-              capacity: cls.maxCapacity || 30
-            }));
-          setRecommendedClasses(recommended);
-        }
-
-      } catch (error) {
-        if (axios.isCancel(error)) {
-          // Ignore canceled requests
-          return;
-        }
-        if (isMounted) {
-          console.error('Failed to fetch dashboard data:', error);
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchAllData();
-
-    return () => {
-      isMounted = false;
-      abortController.abort();
-    };
-  }, [refreshKey]);
-
-  // Refetch enrollments when page becomes visible
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        setRefreshKey(prev => prev + 1);
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
-
-  const buildScheduleFromEnrollments = (enrollmentData: any[]) => {
+  // Build schedule from enrollments
+  const schedule = useMemo(() => {
     const scheduleData: ClassSchedule[] = [];
-    const today = new Date().getDay(); // 0 = Sunday, 1 = Monday, etc.
-
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const today = new Date().getDay();
     const todayName = dayNames[today];
 
-    enrollmentData
+    enrollments
       .filter((enrollment: any) => enrollment.status === 'APPROVED')
       .forEach((enrollment: any) => {
         const classData = enrollment.class;
@@ -209,80 +101,67 @@ export default function StudentDashboard() {
           return;
         }
 
-        // Only show classes that are scheduled for today
         classData.schedule.days.forEach((day: string) => {
           const dayIndex = dayNames.indexOf(day);
-
-          // Only add to schedule if this class is scheduled for today
           if (dayIndex === today) {
-            // Safely get instructor name
             const instructorName = classData.instructor?.user
               ? `${classData.instructor.user.firstName || ''} ${classData.instructor.user.lastName || ''}`.trim()
-              : classData.instructorName || 'TBD';
+              : 'TBD';
+
+            // Check if attendance marked for today
+            const todayAttendance = attendanceHistory.find((r: any) =>
+              r.classId === classData.id &&
+              new Date(r.date).toDateString() === new Date().toDateString()
+            );
 
             scheduleData.push({
               id: classData.id,
               name: classData.name,
               instructor: instructorName,
-              time: `${classData.schedule?.startTime || ''} - ${classData.schedule?.endTime || ''}`,
-              day: todayName,
-              status: 'upcoming',
-              attendanceMarked: false,
-              attendanceStatus: undefined,
-              attendanceId: undefined
+              time: classData.schedule?.startTime || '9:00 AM',
+              day: day,
+              status: classData.status || 'ACTIVE',
+              attendanceMarked: !!todayAttendance,
+              attendanceStatus: todayAttendance?.status,
+              attendanceId: todayAttendance?.id
             });
           }
         });
       });
 
-    setSchedule(scheduleData);
-  };
+    return scheduleData;
+  }, [enrollments, attendanceHistory]);
 
-  const markAttendance = async (classId: string) => {
+  // Calculate recommended classes
+  const recommendedClasses = useMemo(() => {
+    const enrolledClassIds = (enrollments as any[]).map((e) => e.classId);
+    return (allClasses as any[])
+      .filter((cls) => !enrolledClassIds.includes(cls.id))
+      .slice(0, 3)
+      .map((cls) => ({
+        id: cls.id,
+        name: cls.name,
+        instructor: cls.instructorName || 'TBD',
+        schedule: cls.schedule?.days?.join(', ') || 'TBD',
+        enrolled: cls._count?.enrollments || 0,
+        capacity: cls.maxCapacity || 30
+      }));
+  }, [allClasses, enrollments]);
+
+  // Mark attendance using mutation hook
+  const handleMarkAttendance = async (classId: string) => {
     try {
-      const token = localStorage.getItem('token');
-
-      // Optimistic UI update
-      setSchedule(prev =>
-        prev.map(item =>
-          item.id === classId
-            ? { ...item, attendanceMarked: true, attendanceStatus: 'PENDING' as const }
-            : item
-        )
-      );
-
-      await axios.post(
-        `${API_URL}/attendance/mark`,
-        { classId },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
+      await markAttendanceMutation.mutateAsync({ lessonId: classId, classId });
       toast.success('Attendance marked successfully!', {
         description: 'Waiting for instructor approval',
       });
-
-      // Refresh data to get updated attendance
-      setRefreshKey(prev => prev + 1);
     } catch (error: any) {
       console.error('Failed to mark attendance:', error);
-
-      // Revert optimistic update on error
-      setSchedule(prev =>
-        prev.map(item =>
-          item.id === classId
-            ? { ...item, attendanceMarked: false, attendanceStatus: undefined }
-            : item
-        )
-      );
-
       toast.error('Failed to mark attendance', {
         description: error.response?.data?.message || 'Please try again',
       });
     }
   };
-
-  const approvedEnrollments = enrollments.filter(e => e.status === 'APPROVED');
-  const pendingEnrollments = enrollments.filter(e => e.status === 'PENDING');
 
   // Early return if user is not loaded yet
   if (!user) {
@@ -431,8 +310,9 @@ export default function StudentDashboard() {
                         <Button
                           variant="default"
                           size="sm"
-                          onClick={() => markAttendance(item.id)}
+                          onClick={() => handleMarkAttendance(item.id)}
                           className="bg-church-gold hover:bg-yellow-600 text-white"
+                          disabled={markAttendanceMutation.isPending}
                         >
                           <ClipboardCheck className="h-4 w-4 mr-2" />
                           Mark Attendance
@@ -650,7 +530,7 @@ export default function StudentDashboard() {
                         }}
                         attendanceRecords={classAttendance}
                         onMarkAttendance={async (classId: string, date: Date) => {
-                          await markAttendance(classId);
+                          await handleMarkAttendance(classId);
                         }}
                         loading={false}
                       />

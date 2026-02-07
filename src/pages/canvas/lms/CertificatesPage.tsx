@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
-import { Award, Download, Calendar, CheckCircle } from 'lucide-react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Award, Download, Calendar, CheckCircle, Users, FileText, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import axios from 'axios';
+import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
@@ -23,65 +25,77 @@ interface Certificate {
   };
 }
 
+interface EligibilityBreakdown {
+  attendance: {
+    score: number;
+    attended: number;
+    total: number;
+    contribution: number;
+  };
+  assignments: {
+    score: number;
+    completed: number;
+    total: number;
+    contribution: number;
+  };
+}
+
+interface EligibilityData {
+  eligible: boolean;
+  reason: string;
+  progress: number;
+  breakdown?: EligibilityBreakdown;
+  minimumRequired?: number;
+}
+
 interface CertificatesPageProps {
   classId: string;
 }
 
 export default function CertificatesPage({ classId }: CertificatesPageProps) {
-  const [certificates, setCertificates] = useState<Certificate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [eligibility, setEligibility] = useState({
-    eligible: false,
-    reason: '',
-    progress: 0,
-  });
+  const [isDownloading, setIsDownloading] = useState(false);
 
-  useEffect(() => {
-    fetchCertificates();
-    checkEligibility();
-  }, [classId]);
-
-  const fetchCertificates = async () => {
-    try {
-      const token = localStorage.getItem('token');
+  // Fetch certificates
+  const { data: certificates = [], isLoading: certificatesLoading } = useQuery({
+    queryKey: ['certificates', classId],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return [];
       const userId = localStorage.getItem('userId');
-      
       const response = await axios.get(
         `${API_URL}/certificates?classId=${classId}&studentId=${userId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers }
       );
+      return response.data.data || [];
+    },
+    staleTime: staleTimes.standard,
+  });
 
-      setCertificates(response.data.data || []);
-    } catch (error) {
-      console.error('Failed to fetch certificates:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const checkEligibility = async () => {
-    try {
-      const token = localStorage.getItem('token');
+  // Fetch eligibility
+  const { data: eligibility = { eligible: false, reason: '', progress: 0 }, isLoading: eligibilityLoading } = useQuery({
+    queryKey: queryKeys.certificateProgress(classId),
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      if (!headers) return { eligible: false, reason: '', progress: 0 };
       const userId = localStorage.getItem('userId');
-      
       const response = await axios.get(
         `${API_URL}/certificates/eligibility?classId=${classId}&studentId=${userId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers }
       );
+      return response.data.data;
+    },
+    staleTime: staleTimes.dynamic,
+  });
 
-      setEligibility(response.data.data);
-    } catch (error) {
-      console.error('Failed to check eligibility:', error);
-    }
-  };
+  const loading = certificatesLoading || eligibilityLoading;
 
   const downloadCertificate = async (certificateId: string) => {
     try {
-      const token = localStorage.getItem('token');
+      setIsDownloading(true);
       const response = await axios.get(
         `${API_URL}/certificates/${certificateId}/download`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: getAuthHeaders(),
           responseType: 'blob',
         }
       );
@@ -96,6 +110,8 @@ export default function CertificatesPage({ classId }: CertificatesPageProps) {
       link.remove();
     } catch (error) {
       console.error('Failed to download certificate:', error);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -127,17 +143,99 @@ export default function CertificatesPage({ classId }: CertificatesPageProps) {
                   <h3 className="font-semibold text-gray-900 mb-1">
                     Certificate Progress
                   </h3>
-                  <p className="text-gray-700 mb-3">{eligibility.reason}</p>
-                  <div className="space-y-2">
+                  <p className="text-gray-700 mb-4">{eligibility.reason}</p>
+                  
+                  {/* Overall Progress */}
+                  <div className="space-y-2 mb-6">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">Completion Progress</span>
-                      <span className="font-semibold">{eligibility.progress}%</span>
+                      <span className="text-gray-600 font-medium">Overall Progress</span>
+                      <span className="font-bold text-lg">{eligibility.progress}%</span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div className="w-full bg-gray-200 rounded-full h-3">
                       <div
-                        className="bg-blue-600 h-2 rounded-full transition-all"
+                        className={`h-3 rounded-full transition-all ${
+                          eligibility.progress >= (eligibility.minimumRequired || 60)
+                            ? 'bg-green-500'
+                            : 'bg-blue-600'
+                        }`}
                         style={{ width: `${eligibility.progress}%` }}
                       />
+                    </div>
+                    {eligibility.minimumRequired && (
+                      <p className="text-xs text-gray-500 text-right">
+                        Minimum required: {eligibility.minimumRequired}%
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Breakdown Section */}
+                  {eligibility.breakdown && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Attendance Card */}
+                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Users className="h-5 w-5 text-teal-600" />
+                          <span className="font-semibold text-gray-900">Attendance (75%)</span>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Sessions Attended</span>
+                            <span className="font-medium">
+                              {eligibility.breakdown.attendance.attended} / {eligibility.breakdown.attendance.total}
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-2">
+                            <div
+                              className="bg-teal-500 h-2 rounded-full transition-all"
+                              style={{ width: `${eligibility.breakdown.attendance.score}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-500">Score</span>
+                            <span className="font-semibold text-teal-600">
+                              {eligibility.breakdown.attendance.score}% → {eligibility.breakdown.attendance.contribution}pts
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Assignments Card */}
+                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <FileText className="h-5 w-5 text-purple-600" />
+                          <span className="font-semibold text-gray-900">Assignments (25%)</span>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Completed</span>
+                            <span className="font-medium">
+                              {eligibility.breakdown.assignments.completed} / {eligibility.breakdown.assignments.total}
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-2">
+                            <div
+                              className="bg-purple-500 h-2 rounded-full transition-all"
+                              style={{ width: `${eligibility.breakdown.assignments.score}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-500">Score</span>
+                            <span className="font-semibold text-purple-600">
+                              {eligibility.breakdown.assignments.score}% → {eligibility.breakdown.assignments.contribution}pts
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Formula Explanation */}
+                  <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <TrendingUp className="h-4 w-4" />
+                      <span>
+                        <strong>Formula:</strong> (Attendance × 75%) + (Assignments × 25%) = Overall Grade
+                      </span>
                     </div>
                   </div>
                 </div>

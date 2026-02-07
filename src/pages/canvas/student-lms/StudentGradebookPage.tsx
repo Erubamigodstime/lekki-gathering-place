@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { 
   GraduationCap, 
   TrendingUp, 
@@ -25,6 +26,7 @@ import {
 import axios from 'axios';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { getAuthHeaders, staleTimes, queryKeys } from '@/hooks/useApiQueries';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 
@@ -60,80 +62,59 @@ interface StudentGradebookPageProps {
 
 export default function StudentGradebookPage({ classId }: StudentGradebookPageProps) {
   const { user } = useAuth();
-  const [grades, setGrades] = useState<Grade[]>([]);
-  const [allAssignments, setAllAssignments] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<'all' | 'published' | 'pending'>('all');
-  const [studentData, setStudentData] = useState<any>(null);
 
-  useEffect(() => {
-    if (user) {
-      fetchData();
-    }
-  }, [classId, user]);
+  // Fetch student data first to get studentId
+  const { data: studentData, isLoading: isStudentLoading } = useQuery({
+    queryKey: ['students', 'user', user?.id],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API_URL}/students/user/${user?.id}`, { headers });
+      return response.data.data;
+    },
+    enabled: !!user?.id,
+    staleTime: staleTimes.standard,
+  });
 
-  const fetchData = async () => {
-    await Promise.all([
-      fetchGrades(),
-      fetchStudentData(),
-      fetchAssignments(),
-    ]);
-  };
-
-  const fetchAssignments = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/assignments/class/${classId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setAllAssignments(response.data.data || []);
-    } catch (error) {
-      console.error('Failed to fetch assignments:', error);
-    }
-  };
-
-  const fetchStudentData = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${API_URL}/students/user/${user?.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setStudentData(response.data.data);
-    } catch (error) {
-      console.error('Failed to fetch student data:', error);
-    }
-  };
-
-  const fetchGrades = async () => {
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      
-      // Get student record first
-      const studentRes = await axios.get(`${API_URL}/students/user/${user?.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
-      const studentId = studentRes.data.data.id;
-      
-      // Fetch grades for this student in this class
+  // Fetch grades for this student in this class (depends on studentId)
+  const { data: grades = [], isLoading: isGradesLoading, error: gradesError } = useQuery({
+    queryKey: queryKeys.studentGrades(classId),
+    queryFn: async () => {
+      const headers = getAuthHeaders();
       const response = await axios.get(
-        `${API_URL}/grades/student/${studentId}?classId=${classId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        `${API_URL}/grades/student/${studentData.id}?classId=${classId}`,
+        { headers }
       );
-      
       // Backend returns { data: { data: grades[], pagination: {...} } }
       const gradesData = response.data.data?.data || response.data.data || [];
       console.log('Student grades response:', response.data);
       console.log('Extracted grades data:', gradesData);
-      setGrades(Array.isArray(gradesData) ? gradesData : []);
-    } catch (error: any) {
-      console.error('Failed to fetch grades:', error);
-      toast.error(error.response?.data?.message || 'Failed to load grades');
-    } finally {
-      setLoading(false);
-    }
-  };
+      return Array.isArray(gradesData) ? gradesData : [];
+    },
+    enabled: !!studentData?.id && !!classId,
+    staleTime: staleTimes.dynamic,
+  });
+
+  // Fetch all assignments for this class
+  const { data: allAssignments = [], isLoading: isAssignmentsLoading } = useQuery({
+    queryKey: ['assignments', 'class', classId],
+    queryFn: async () => {
+      const headers = getAuthHeaders();
+      const response = await axios.get(`${API_URL}/assignments/class/${classId}`, { headers });
+      return response.data.data || [];
+    },
+    enabled: !!classId,
+    staleTime: staleTimes.standard,
+  });
+
+  // Show error toast if grades fetch fails
+  if (gradesError) {
+    const error = gradesError as any;
+    toast.error(error.response?.data?.message || 'Failed to load grades');
+  }
+
+  // Derive loading state from all queries
+  const loading = isStudentLoading || isGradesLoading || isAssignmentsLoading;
 
   // Combine all assignments with grades
   const getAssignmentsWithGrades = () => {
