@@ -94,7 +94,7 @@ const HeroSection = () => {
         <div className="absolute top-32 right-[45%] w-10 h-10 border border-primary-foreground/10 rounded-lg opacity-20" />
       </div>
 
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 pt-24 sm:pt-28 lg:pt-32 pb-12 sm:pb-16 lg:pb-20">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 pt-16 sm:pt-8 lg:pt-32 pb-12 sm:pb-16 lg:pb-20">
         <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
           {/* Left Content */}
           <div className="relative z-10 text-center lg:text-left">
@@ -142,29 +142,71 @@ const HeroSection = () => {
 
 
             {/* CTA Buttons */}
-            <div className="flex flex-col md:mt-48 sm:flex-row items-center justify-center lg:justify-start gap-4">
-              <Button 
-                onClick={handleRegisterClick}
-                className="rounded-full bg-accent text-accent-foreground hover:bg-gathering-yellow-hover px-6 sm:px-8 py-5 sm:py-6 text-sm sm:text-base font-semibold w-full sm:w-auto flex items-center justify-around sm:justify-center gap-2"
-              >
-                Register Now
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary flex-shrink-0">
-                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                    <path d="M7 17L17 7M17 7H7M17 7V17" />
-                  </svg>
-                </span>
-              </Button>
-              <Button 
-                onClick={handleDashboardClick}
-                className="rounded-full bg-primary-foreground text-primary hover:bg-secondary px-6 sm:px-8 py-5 sm:py-6 text-sm sm:text-base font-semibold w-full sm:w-auto flex items-center justify-around sm:justify-center gap-2"
-              >
-                Go to Dashboard
-                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-accent flex-shrink-0">
-                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                    <path d="M7 17L17 7M17 7H7M17 7V17" />
-                  </svg>
-                </span>
-              </Button>
+            <div className="flex flex-col mt-12 md:mt-48 items-center lg:items-start gap-8">
+              {/* Desktop: Register + Dashboard side by side */}
+              <div className="hidden lg:flex flex-row items-center justify-start gap-4">
+                <Button 
+                  onClick={handleRegisterClick}
+                  className="rounded-full bg-accent text-accent-foreground hover:bg-gathering-yellow-hover px-6 sm:px-8 py-5 sm:py-6 text-sm sm:text-base font-semibold flex items-center justify-center gap-2"
+                >
+                  Register Now
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary flex-shrink-0">
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                      <path d="M7 17L17 7M17 7H7M17 7V17" />
+                    </svg>
+                  </span>
+                </Button>
+                <Button 
+                  onClick={handleDashboardClick}
+                  className="rounded-full bg-primary-foreground text-primary hover:bg-secondary px-6 sm:px-8 py-5 sm:py-6 text-sm sm:text-base font-semibold flex items-center justify-center gap-2"
+                >
+                  Go to Dashboard
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-accent flex-shrink-0">
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M7 17L17 7M17 7H7M17 7V17" />
+                    </svg>
+                  </span>
+                </Button>
+              </div>
+
+              {/* Mobile: Register + Login side by side, Dashboard below */}
+              <div className="lg:hidden flex flex-col items-center gap-12">
+                <div className="flex flex-row items-center justify-center gap-4">
+                  <Button 
+                    onClick={handleRegisterClick}
+                    className="rounded-full bg-accent text-accent-foreground hover:bg-gathering-yellow-hover px-6 sm:px-8 py-5 sm:py-6 text-sm sm:text-base font-semibold flex items-center justify-center gap-2"
+                  >
+                    Register Now
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary flex-shrink-0">
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                        <path d="M7 17L17 7M17 7H7M17 7V17" />
+                      </svg>
+                    </span>
+                  </Button>
+                  <Button 
+                    onClick={() => navigate('/login')}
+                    className="rounded-full bg-emerald-600 text-white hover:bg-emerald-700 px-6 sm:px-8 py-5 sm:py-6 text-sm sm:text-base font-semibold flex items-center justify-center gap-2"
+                  >
+                    Log In Now
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/20 flex-shrink-0">
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                        <path d="M7 17L17 7M17 7H7M17 7V17" />
+                      </svg>
+                    </span>
+                  </Button>
+                </div>
+                <Button 
+                  onClick={handleDashboardClick}
+                  className="rounded-full bg-primary-foreground text-primary hover:bg-secondary px-6 sm:px-8 py-5 sm:py-6 text-sm sm:text-base font-semibold w-full flex items-center justify-between"
+                >
+                  Go to Dashboard
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-accent flex-shrink-0">
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M7 17L17 7M17 7H7M17 7V17" />
+                    </svg>
+                  </span>
+                </Button>
+              </div>
          
             </div>
           </div>
