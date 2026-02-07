@@ -23,7 +23,7 @@ async function fetchVapidKey(): Promise<string | null> {
   if (VAPID_PUBLIC_KEY) return VAPID_PUBLIC_KEY;
   
   try {
-    const API_URL = import.meta.env.VITE_API_URL || 'https://ysa-gathering-place.onrender.com/api';
+    const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
     const response = await fetch(`${API_URL}/push/vapid-key`);
     const data = await response.json();
     VAPID_PUBLIC_KEY = data.data?.vapidKey || null;

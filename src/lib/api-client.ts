@@ -6,7 +6,7 @@
 
 import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://ysa-gathering-place.onrender.com/api';
+const API_URL = import.meta.env.VITE_API_URL || 'https://lekki-gathering-place-backend-1.onrender.com/api/v1';
 
 // Get auth token
 function getAuthToken(): string | null {
